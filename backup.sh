@@ -483,7 +483,9 @@ collect_stack_files() {
     if [[ ${#external_mounts[@]} -gt 0 ]]; then
         mkdir -p "$target_dir/external-mounts"
         for mount in "${external_mounts[@]}"; do
-            if [[ -e "$mount" ]]; then
+            if [[ -S "$mount" ]]; then
+                warn "Skipping socket: $mount"
+            elif [[ -e "$mount" ]]; then
                 local mount_name
                 mount_name="$(echo "$mount" | tr '/' '_' | sed 's/^_//')"
                 info "Backing up external bind mount: $mount"
