@@ -1,0 +1,414 @@
+#!/usr/bin/env bash
+# =============================================================================
+# restore.sh — Full bare-metal restore of a Docker Compose stack from restic
+#
+# Designed to run on a fresh VPS with only Docker + restic installed.
+# Restores: compose files, .env, named volumes, bind mounts, DB dumps.
+#
+# Usage:
+#   restore.sh [snapshot-id]           Restore specific snapshot (default: latest)
+#   restore.sh --list                  List available snapshots
+#   restore.sh --verify                Restore + verify only (don't start stack)
+#
+# Environment:
+#   RESTIC_REPOSITORY     restic repo path (required)
+#   RESTIC_PASSWORD       restic encryption password (required)
+#   RESTIC_PASSWORD_FILE  Alternative: file containing the password
+#   RESTORE_TARGET        Where to restore the stack (default: /opt/stack)
+# =============================================================================
+
+set -euo pipefail
+
+readonly VERSION="1.0.0"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
+RESTIC_PASSWORD="${RESTIC_PASSWORD:-}"
+RESTORE_TARGET="${RESTORE_TARGET:-/opt/stack}"
+SNAPSHOT_ID="${1:-latest}"
+
+COMPOSE_CMD=""
+STAGING_DIR=""
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+_log()  { echo "[$(date '+%H:%M:%S')] $1  $2"; }
+info()  { _log "==>" "$*"; }
+ok()    { _log " ok" "$*"; }
+warn()  { _log "wrn" "$*"; }
+err()   { _log "ERR" "$*" >&2; }
+die()   { err "$1"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Prerequisites
+# ---------------------------------------------------------------------------
+
+check_prereqs() {
+    local missing=()
+    for cmd in docker jq restic; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "Missing required tools: ${missing[*]}"
+    fi
+
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_CMD="docker-compose"
+    else
+        die "Neither 'docker compose' nor 'docker-compose' found"
+    fi
+
+    [[ -z "$RESTIC_REPOSITORY" ]] && die "RESTIC_REPOSITORY not set"
+    [[ -z "$RESTIC_PASSWORD" && -z "${RESTIC_PASSWORD_FILE:-}" ]] && \
+        die "RESTIC_PASSWORD or RESTIC_PASSWORD_FILE not set"
+
+    export RESTIC_REPOSITORY RESTIC_PASSWORD
+    [[ -n "${RESTIC_PASSWORD_FILE:-}" ]] && export RESTIC_PASSWORD_FILE
+}
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+cleanup() {
+    if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
+        rm -rf "$STAGING_DIR"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Main restore logic
+# ---------------------------------------------------------------------------
+
+cmd_list() {
+    check_prereqs
+    restic snapshots --tag "docker-stack-backup"
+}
+
+cmd_restore() {
+    check_prereqs
+
+    local verify_only=false
+    if [[ "${1:-}" == "--verify" ]]; then
+        verify_only=true
+        shift
+        SNAPSHOT_ID="${1:-latest}"
+    fi
+
+    info "=== Restore started ==="
+    info "Repository: $RESTIC_REPOSITORY"
+    info "Snapshot: $SNAPSHOT_ID"
+    info "Target: $RESTORE_TARGET"
+
+    local start_time
+    start_time="$(date +%s)"
+
+    STAGING_DIR="$(mktemp -d /tmp/dsb-restore.XXXXXX)"
+    trap cleanup EXIT
+
+    # Phase 1: Restic restore to staging
+    info "--- Phase 1: Restic restore ---"
+    restic restore "$SNAPSHOT_ID" --target "$STAGING_DIR" --tag "docker-stack-backup"
+
+    # Find the actual backup root (restic preserves full path)
+    local backup_root
+    backup_root="$(find "$STAGING_DIR" -name "meta.json" -path "*/dsb-staging*" -print -quit 2>/dev/null)"
+    if [[ -z "$backup_root" ]]; then
+        die "No meta.json found in snapshot — is this a docker-stack-backup snapshot?"
+    fi
+    backup_root="$(dirname "$backup_root")"
+    ok "Backup data found at: $backup_root"
+
+    # Read metadata
+    local orig_stack_dir
+    orig_stack_dir="$(jq -r '.stack_dir' "$backup_root/meta.json")"
+    info "Original stack was at: $orig_stack_dir"
+
+    if [[ -f "$backup_root/meta.json" ]]; then
+        echo ""
+        echo "--- Backup metadata ---"
+        jq '.' "$backup_root/meta.json"
+        echo ""
+    fi
+
+    # Phase 2: Restore stack files
+    info "--- Phase 2: Restore stack files ---"
+    mkdir -p "$RESTORE_TARGET"
+
+    if [[ -d "$backup_root/stack-dir" ]]; then
+        # The stack-dir contains the full directory tree
+        # Find the actual content (rsync --relative creates nested structure)
+        local stack_content
+        stack_content="$backup_root/stack-dir"
+
+        # rsync with --relative creates the path structure, navigate to leaf
+        # The content is at stack-dir/<relative-path>/
+        if [[ -d "$stack_content/./" ]]; then
+            rsync -a "$stack_content/./" "$RESTORE_TARGET/"
+        else
+            rsync -a "$stack_content/" "$RESTORE_TARGET/"
+        fi
+        ok "Stack files restored to $RESTORE_TARGET"
+    fi
+
+    # Restore compose files and env files (may be separate copies)
+    for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml \
+             docker-compose.override.yml docker-compose.override.yaml \
+             .env .env.local .env.production; do
+        if [[ -f "$backup_root/$f" ]]; then
+            cp "$backup_root/$f" "$RESTORE_TARGET/"
+            ok "  Restored: $f"
+        fi
+    done
+
+    # Phase 3: External bind mounts
+    info "--- Phase 3: Restore external bind mounts ---"
+    if [[ -d "$backup_root/external-mounts" ]]; then
+        for archive in "$backup_root/external-mounts/"*.tar.gz; do
+            [[ -f "$archive" ]] || continue
+            local mount_name
+            mount_name="$(basename "$archive" .tar.gz)"
+            # Convert encoded path back: _opt_data → /opt/data
+            local mount_path
+            mount_path="/$(echo "$mount_name" | tr '_' '/')"
+            info "Restoring external mount: $mount_path"
+            mkdir -p "$mount_path"
+            tar xzf "$archive" -C "$mount_path"
+            ok "  $mount_path restored"
+        done
+    else
+        info "No external bind mounts to restore"
+    fi
+
+    # Phase 4: Create Docker volumes and import data
+    info "--- Phase 4: Restore Docker volumes ---"
+    if [[ -d "$backup_root/volumes" ]]; then
+        for vol_archive in "$backup_root/volumes/"*.tar.gz; do
+            [[ -f "$vol_archive" ]] || continue
+            local vol_name
+            vol_name="$(basename "$vol_archive" .tar.gz)"
+
+            # Determine the full volume name (with compose project prefix)
+            # Check meta.json for original mapping
+            local real_vol_name
+            real_vol_name="$(jq -r --arg v "$vol_name" '.volume_mapping[$v] // ""' "$backup_root/meta.json")"
+
+            if [[ -z "$real_vol_name" ]]; then
+                # Fallback: use compose project name + volume name
+                local project_name
+                project_name="$(basename "$RESTORE_TARGET" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')"
+                real_vol_name="${project_name}_${vol_name}"
+            fi
+
+            info "Restoring volume: $vol_name -> $real_vol_name"
+
+            # Create volume if needed
+            docker volume create "$real_vol_name" >/dev/null 2>&1 || true
+
+            # Import data
+            docker run --rm \
+                -v "$real_vol_name":/data \
+                -v "$(dirname "$vol_archive")":/backup:ro \
+                alpine sh -c "rm -rf /data/* /data/..?* /data/.[!.]* 2>/dev/null; tar xzf /backup/$(basename "$vol_archive") -C /data"
+
+            ok "  $real_vol_name restored"
+        done
+    else
+        info "No volumes to restore"
+    fi
+
+    if $verify_only; then
+        ok "=== Verify complete — stack NOT started ==="
+        info "Files restored to: $RESTORE_TARGET"
+        info "To start: cd $RESTORE_TARGET && $COMPOSE_CMD up -d"
+        cleanup
+        return 0
+    fi
+
+    # Phase 5: Start the stack (DB containers first for dump import)
+    info "--- Phase 5: Start stack ---"
+    cd "$RESTORE_TARGET"
+
+    # First, try to start just DB services to import dumps
+    if [[ -d "$backup_root/dumps" ]] && ls "$backup_root/dumps/"* >/dev/null 2>&1; then
+        info "Starting database containers for dump import..."
+
+        # Detect DB services from compose config
+        local config
+        config="$($COMPOSE_CMD config --format json 2>/dev/null)"
+        local db_services=()
+
+        while IFS=$'\t' read -r svc image; do
+            [[ -z "$svc" ]] && continue
+            case "$image" in
+                *postgres*|*postgis*|*mariadb*|*mysql*|*mongo*)
+                    db_services+=("$svc")
+                    ;;
+            esac
+        done < <(echo "$config" | jq -r '.services | to_entries[] | "\(.key)\t\(.value.image // "build")"')
+
+        if [[ ${#db_services[@]} -gt 0 ]]; then
+            $COMPOSE_CMD up -d "${db_services[@]}"
+            info "Waiting for databases to be ready..."
+            sleep 15
+
+            # Import dumps
+            for dump_file in "$backup_root/dumps/"*; do
+                [[ -f "$dump_file" ]] || continue
+                local dump_name
+                dump_name="$(basename "$dump_file")"
+                local svc_name
+                svc_name="$(echo "$dump_name" | sed 's/_\(postgres\|mysql\|mongo\).*$//')"
+
+                case "$dump_name" in
+                    *_postgres.sql.gz)
+                        info "Importing PostgreSQL dump: $dump_name -> $svc_name"
+                        local container
+                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                        if [[ -n "$container" ]]; then
+                            local pg_user
+                            pg_user="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                                | grep '^POSTGRES_USER=' | cut -d= -f2)"
+                            pg_user="${pg_user:-postgres}"
+                            # Wait for postgres to accept connections
+                            for i in $(seq 1 30); do
+                                if docker exec "$container" pg_isready -U "$pg_user" >/dev/null 2>&1; then
+                                    break
+                                fi
+                                sleep 2
+                            done
+                            gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" 2>&1 \
+                                | tail -3 || warn "PostgreSQL import reported errors (may be harmless)"
+                            ok "  PostgreSQL dump imported"
+                        else
+                            warn "  Container for $svc_name not running — skip dump import"
+                        fi
+                        ;;
+
+                    *_mysql.sql.gz)
+                        info "Importing MySQL dump: $dump_name -> $svc_name"
+                        local container
+                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                        if [[ -n "$container" ]]; then
+                            local root_pass
+                            root_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                                | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)"
+                            # Wait for mysql
+                            for i in $(seq 1 30); do
+                                if docker exec "$container" mysqladmin ping -uroot "-p${root_pass}" >/dev/null 2>&1; then
+                                    break
+                                fi
+                                sleep 2
+                            done
+                            if [[ -n "$root_pass" ]]; then
+                                gunzip -c "$dump_file" | docker exec -i "$container" mysql -uroot "-p${root_pass}" 2>&1 \
+                                    | tail -3 || warn "MySQL import reported errors (may be harmless)"
+                            else
+                                gunzip -c "$dump_file" | docker exec -i "$container" mysql -uroot 2>&1 \
+                                    | tail -3 || warn "MySQL import reported errors"
+                            fi
+                            ok "  MySQL dump imported"
+                        fi
+                        ;;
+
+                    *_mongo.archive.gz)
+                        info "Importing MongoDB dump: $dump_name -> $svc_name"
+                        local container
+                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                        if [[ -n "$container" ]]; then
+                            docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1 \
+                                | tail -3 || warn "MongoDB import reported errors"
+                            ok "  MongoDB dump imported"
+                        fi
+                        ;;
+                esac
+            done
+        fi
+    fi
+
+    # Start full stack
+    info "Starting full stack..."
+    $COMPOSE_CMD up -d
+
+    # Brief wait, then show status
+    sleep 5
+    echo ""
+    echo "--- Container status ---"
+    $COMPOSE_CMD ps
+    echo ""
+
+    # Cleanup staging
+    cleanup
+    STAGING_DIR=""
+    trap - EXIT
+
+    local end_time duration
+    end_time="$(date +%s)"
+    duration="$((end_time - start_time))"
+
+    ok "=== Restore complete (${duration}s) ==="
+    info "Stack running at: $RESTORE_TARGET"
+}
+
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+docker-stack-backup restore v${VERSION} — Bare-metal Docker Compose restore
+
+Usage: $(basename "$0") [options] [snapshot-id]
+
+Options:
+  --list      List available snapshots
+  --verify    Restore files only, don't start stack
+  --help      Show this help
+
+Arguments:
+  snapshot-id  Restic snapshot to restore (default: latest)
+
+Environment:
+  RESTIC_REPOSITORY      Restic repository (required)
+  RESTIC_PASSWORD        Encryption password (required)
+  RESTIC_PASSWORD_FILE   Alternative: path to password file
+  RESTORE_TARGET         Where to restore (default: /opt/stack)
+
+Example (bare-metal VPS restore):
+  # Install prerequisites
+  apt-get update && apt-get install -y docker.io restic jq
+
+  # Set credentials
+  export RESTIC_REPOSITORY=sftp:backup@storage:/kigulls-kunde01
+  export RESTIC_PASSWORD=\$(cat /etc/backup-password)
+  export RESTORE_TARGET=/opt/kigulls
+
+  # Restore
+  $(basename "$0") --list              # Pick a snapshot
+  $(basename "$0") latest              # Or restore latest
+  $(basename "$0") abc12345            # Or restore specific snapshot
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+main() {
+    case "${1:-}" in
+        --list|-l)      cmd_list ;;
+        --help|-h|help) usage ;;
+        --verify)       cmd_restore --verify "${@:2}" ;;
+        *)              cmd_restore "$@" ;;
+    esac
+}
+
+main "$@"
