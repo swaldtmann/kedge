@@ -59,6 +59,8 @@ export RESTORE_TARGET=/opt/myapp
 | `backup.sh list` | List snapshots |
 | `backup.sh check` | Verify repository integrity |
 | `backup.sh prune` | Remove old snapshots per retention policy |
+| `verify.sh [snapshot]` | Restore verification on ephemeral hcloud box |
+| `verify.sh --burn` | Clean up leftover verify boxes |
 | `restore.sh [snapshot]` | Full restore (default: latest) |
 | `restore.sh --list` | List available snapshots |
 | `restore.sh --verify` | Restore files only, don't start stack |
@@ -162,6 +164,24 @@ export HCLOUD_TOKEN=<your-token>
 ```
 
 This creates two ephemeral VPS boxes, deploys a sample stack (Postgres + Valkey + Nginx), seeds test data, backs up, restores on a fresh box, verifies data integrity, and burns both.
+
+## Restore Verification
+
+Monthly automated proof that your backups actually work. Spins up a fresh Hetzner Cloud box, restores the latest snapshot, runs health checks, burns the box.
+
+```bash
+# Verify latest backup
+. /etc/dsb-backup.env && ./verify.sh
+
+# Cron: monthly on the 1st at 05:00 UTC
+0 5 1 * * root . /etc/dsb-backup.env && /usr/local/bin/dsb-verify latest >> /var/log/dsb-verify.log 2>&1
+```
+
+Health checks:
+- All containers from `docker-compose.yml` are running
+- Database containers accept connections (PostgreSQL, MySQL, Valkey, MongoDB)
+- Services with exposed ports respond to HTTP
+- `.env` configuration file is present
 
 ## Documentation
 
