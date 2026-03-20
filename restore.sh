@@ -303,23 +303,23 @@ cmd_restore() {
                         local container
                         container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
                         if [[ -n "$container" ]]; then
-                            local root_pass
-                            root_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                                | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)"
+                            # Pass password via MYSQL_PWD env var (not visible in ps)
+                            local mysql_pass=""
+                            mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                                | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
+                            local mysql_exec_args=()
+                            if [[ -n "$mysql_pass" ]]; then
+                                mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
+                            fi
                             # Wait for mysql
                             for i in $(seq 1 30); do
-                                if docker exec "$container" mysqladmin ping -uroot "-p${root_pass}" >/dev/null 2>&1; then
+                                if docker exec "${mysql_exec_args[@]}" "$container" mysqladmin ping -uroot >/dev/null 2>&1; then
                                     break
                                 fi
                                 sleep 2
                             done
-                            if [[ -n "$root_pass" ]]; then
-                                gunzip -c "$dump_file" | docker exec -i "$container" mysql -uroot "-p${root_pass}" 2>&1 \
-                                    | tail -3 || warn "MySQL import reported errors (may be harmless)"
-                            else
-                                gunzip -c "$dump_file" | docker exec -i "$container" mysql -uroot 2>&1 \
-                                    | tail -3 || warn "MySQL import reported errors"
-                            fi
+                            gunzip -c "$dump_file" | docker exec -i "${mysql_exec_args[@]}" "$container" mysql -uroot 2>&1 \
+                                | tail -3 || warn "MySQL import reported errors (may be harmless)"
                             ok "  MySQL dump imported"
                         fi
                         ;;

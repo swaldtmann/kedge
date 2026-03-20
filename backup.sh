@@ -263,45 +263,55 @@ run_pre_hooks() {
 
             mysql)
                 info "Dumping MySQL/MariaDB ($container_name)..."
-                # Try MYSQL_ROOT_PASSWORD, then MARIADB_ROOT_PASSWORD
-                local root_pass
-                root_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                    | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)"
-                if [[ -n "$root_pass" ]]; then
-                    docker exec "$container" mysqldump --all-databases -uroot "-p${root_pass}" 2>/dev/null \
-                        | gzip > "$dump_dir/${svc}_mysql.sql.gz"
-                else
-                    docker exec "$container" mysqldump --all-databases -uroot 2>/dev/null \
-                        | gzip > "$dump_dir/${svc}_mysql.sql.gz"
+                # Extract password from container env — pass via MYSQL_PWD env var (not CLI arg)
+                local mysql_pass=""
+                mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                    | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
+                local mysql_exec_args=()
+                if [[ -n "$mysql_pass" ]]; then
+                    mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                 fi
+                docker exec "${mysql_exec_args[@]}" "$container" mysqldump --all-databases -uroot 2>/dev/null \
+                    | gzip > "$dump_dir/${svc}_mysql.sql.gz"
                 ok "MySQL dump: ${svc}_mysql.sql.gz ($(du -h "$dump_dir/${svc}_mysql.sql.gz" | cut -f1))"
                 hooks_run=$((hooks_run + 1))
                 ;;
 
             valkey)
                 info "Triggering BGSAVE on $container_name..."
-                # Send BGSAVE and wait for completion
-                docker exec "$container" sh -c '
-                    if command -v valkey-cli >/dev/null 2>&1; then
-                        CLI=valkey-cli
-                    else
-                        CLI=redis-cli
-                    fi
-                    # Auth if REQUIREPASS or password in args
-                    PASS=""
-                    for arg in $(cat /proc/1/cmdline | tr "\0" "\n"); do
-                        case "$arg" in --requirepass|--requirepass=*) ;; esac
-                    done
-                    # Try without auth first, then check config for requirepass
-                    $CLI BGSAVE 2>/dev/null || $CLI -a "${VALKEY_PASSWORD:-${REDIS_PASSWORD:-}}" BGSAVE 2>/dev/null || true
-                    sleep 2
-                    # Wait for save to complete
+                # Extract password from container env or command args — never pass via CLI
+                local vk_pass=""
+                vk_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                    | grep -E '^(VALKEY_PASSWORD|REDIS_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
+                if [[ -z "$vk_pass" ]]; then
+                    # Try extracting --requirepass from command args
+                    vk_pass="$(docker inspect --format '{{json .Config.Cmd}}' "$container" \
+                        | jq -r '.[]?' 2>/dev/null | grep -A1 '^--requirepass$' | tail -1 || true)"
+                fi
+                if [[ -z "$vk_pass" ]]; then
+                    # Try inline --requirepass=VALUE
+                    vk_pass="$(docker inspect --format '{{json .Config.Cmd}}' "$container" \
+                        | jq -r '.[]?' 2>/dev/null | grep '^--requirepass=' | cut -d= -f2 || true)"
+                fi
+
+                # Use REDISCLI_AUTH env var via docker exec -e (not visible in ps)
+                local vk_exec_args=()
+                if [[ -n "$vk_pass" ]]; then
+                    vk_exec_args=(-e "REDISCLI_AUTH=$vk_pass")
+                fi
+
+                # BGSAVE + wait for completion
+                docker exec "${vk_exec_args[@]}" "$container" sh -c '
+                    if command -v valkey-cli >/dev/null 2>&1; then CLI=valkey-cli; else CLI=redis-cli; fi
+                    BEFORE=$($CLI LASTSAVE 2>/dev/null | tr -dc "0-9")
+                    $CLI BGSAVE >/dev/null 2>&1
                     for i in $(seq 1 30); do
-                        SAVING=$($CLI LASTSAVE 2>/dev/null || $CLI -a "${VALKEY_PASSWORD:-${REDIS_PASSWORD:-}}" LASTSAVE 2>/dev/null || echo "0")
+                        AFTER=$($CLI LASTSAVE 2>/dev/null | tr -dc "0-9")
+                        if [ "$AFTER" != "$BEFORE" ] 2>/dev/null; then exit 0; fi
                         sleep 1
                     done
                 ' 2>/dev/null || true
-                ok "BGSAVE triggered on $container_name (data in volume, backed up with volume export)"
+                ok "BGSAVE completed on $container_name"
                 hooks_run=$((hooks_run + 1))
                 ;;
 
