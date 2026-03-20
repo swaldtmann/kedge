@@ -16,7 +16,8 @@
 #   test.sh --burn              Burn any leftover test boxes
 #
 # Environment:
-#   HCLOUD_TOKEN           Hetzner Cloud API token (required)
+#   HCLOUD_CONTEXT         hcloud CLI context to use (default: kigulls-test)
+#   HCLOUD_TOKEN           Alternative: API token directly (overrides context)
 #   TEST_SERVER_TYPE       Server type (default: cx22)
 #   TEST_LOCATION          Datacenter (default: nbg1)
 # =============================================================================
@@ -30,6 +31,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
+HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
 TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cx22}"
 TEST_LOCATION="${TEST_LOCATION:-nbg1}"
 TEST_IMAGE="ubuntu-24.04"
@@ -64,8 +66,20 @@ check_prereqs() {
     for cmd in hcloud ssh scp; do
         command -v "$cmd" >/dev/null 2>&1 || die "Required: $cmd"
     done
-    [[ -z "$HCLOUD_TOKEN" ]] && die "HCLOUD_TOKEN not set"
-    export HCLOUD_TOKEN
+
+    if [[ -n "$HCLOUD_TOKEN" ]]; then
+        export HCLOUD_TOKEN
+    else
+        # Use hcloud CLI context
+        local prev_context
+        prev_context="$(hcloud context active 2>/dev/null || true)"
+        if [[ "$prev_context" != "$HCLOUD_CONTEXT" ]]; then
+            info "Switching hcloud context: $prev_context -> $HCLOUD_CONTEXT"
+            hcloud context use "$HCLOUD_CONTEXT" || die "hcloud context '$HCLOUD_CONTEXT' not found"
+        fi
+        # Verify context works
+        hcloud server list >/dev/null 2>&1 || die "hcloud context '$HCLOUD_CONTEXT' not working — check token"
+    fi
 }
 
 # ---------------------------------------------------------------------------
