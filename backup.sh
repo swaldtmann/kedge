@@ -26,6 +26,17 @@
 #   BACKUP_KEEP_WEEKLY    Retention: weekly snapshots to keep (default: 4)
 #   BACKUP_KEEP_MONTHLY   Retention: monthly snapshots to keep (default: 3)
 #   BACKUP_EXCLUDE_VOLUMES  Space-separated volume names to skip
+#   BACKUP_POST_HOOK      Command to run after successful backup (optional)
+#   BACKUP_FAIL_HOOK      Command to run after failed backup (optional)
+#
+# Hook variables (expanded in BACKUP_POST_HOOK / BACKUP_FAIL_HOOK):
+#   $BACKUP_DURATION      Backup duration in seconds
+#   $BACKUP_SIZE          Restic repo size (human-readable)
+#   $BACKUP_SNAPSHOT      Snapshot ID
+#   $BACKUP_HOSTNAME      Server hostname
+#   $BACKUP_STACK         Stack directory basename
+#   $BACKUP_TIMESTAMP     ISO 8601 UTC timestamp
+#   $BACKUP_ERROR         Error message (BACKUP_FAIL_HOOK only)
 # =============================================================================
 
 set -euo pipefail
@@ -45,11 +56,21 @@ BACKUP_KEEP_DAILY="${BACKUP_KEEP_DAILY:-7}"
 BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-4}"
 BACKUP_KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-3}"
 BACKUP_EXCLUDE_VOLUMES="${BACKUP_EXCLUDE_VOLUMES:-}"
+BACKUP_POST_HOOK="${BACKUP_POST_HOOK:-}"
+BACKUP_FAIL_HOOK="${BACKUP_FAIL_HOOK:-}"
 
 # Internal
 STAGING_DIR=""
 STACK_WAS_RUNNING=false
 COMPOSE_CMD=""
+# Hook context (populated during backup, exported for hooks)
+BACKUP_DURATION=""
+BACKUP_SIZE=""
+BACKUP_SNAPSHOT=""
+BACKUP_HOSTNAME=""
+BACKUP_STACK=""
+BACKUP_TIMESTAMP=""
+BACKUP_ERROR=""
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -61,6 +82,31 @@ ok()    { _log " ok" "$*"; }
 warn()  { _log "wrn" "$*"; }
 err()   { _log "ERR" "$*" >&2; }
 die()   { err "$1"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Hooks
+# ---------------------------------------------------------------------------
+
+run_hook() {
+    local hook_cmd="$1"
+    local hook_name="$2"
+
+    if [[ -z "$hook_cmd" ]]; then
+        return 0
+    fi
+
+    info "Running $hook_name..."
+    # Export context variables so the hook command can use them
+    export BACKUP_DURATION BACKUP_SIZE BACKUP_SNAPSHOT BACKUP_HOSTNAME
+    export BACKUP_STACK BACKUP_TIMESTAMP BACKUP_ERROR
+
+    # Run hook via eval so variables in the command string get expanded
+    if eval "$hook_cmd"; then
+        ok "$hook_name completed"
+    else
+        warn "$hook_name failed (exit $?) — continuing"
+    fi
+}
 
 # ---------------------------------------------------------------------------
 # Prerequisites
@@ -479,6 +525,11 @@ cleanup() {
     fi
     if [[ $exit_code -ne 0 ]]; then
         err "Backup failed (exit code $exit_code)"
+        BACKUP_ERROR="Backup failed with exit code $exit_code"
+        BACKUP_HOSTNAME="$(hostname -f 2>/dev/null || hostname)"
+        BACKUP_STACK="$(basename "$STACK_DIR")"
+        BACKUP_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        run_hook "$BACKUP_FAIL_HOOK" "fail-hook" || true
     fi
 }
 
@@ -591,10 +642,26 @@ cmd_backup() {
     local hostname_str
     hostname_str="$(hostname -f 2>/dev/null || hostname)"
 
-    restic backup "$STAGING_DIR" \
+    local restic_output
+    restic_output="$(restic backup "$STAGING_DIR" \
         --tag "docker-stack-backup" \
         --tag "stack:$(basename "$STACK_DIR")" \
-        --host "$hostname_str"
+        --host "$hostname_str" \
+        --json 2>/dev/null || true)"
+
+    # Try to extract snapshot ID from JSON output, fall back to non-JSON
+    BACKUP_SNAPSHOT="$(echo "$restic_output" | jq -r 'select(.message_type == "summary") .snapshot_id // empty' 2>/dev/null || true)"
+    if [[ -z "$BACKUP_SNAPSHOT" ]]; then
+        # Fallback: run without --json
+        restic backup "$STAGING_DIR" \
+            --tag "docker-stack-backup" \
+            --tag "stack:$(basename "$STACK_DIR")" \
+            --host "$hostname_str"
+        BACKUP_SNAPSHOT="$(restic snapshots --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty' 2>/dev/null || echo "unknown")"
+    else
+        # Show the output
+        echo "$restic_output" | jq -r 'select(.message_type == "summary") | "snapshot \(.snapshot_id) saved"' 2>/dev/null || true
+    fi
 
     # Cleanup staging
     rm -rf "$STAGING_DIR"
@@ -604,9 +671,23 @@ cmd_backup() {
     end_time="$(date +%s)"
     duration="$((end_time - start_time))"
 
+    # Populate hook context
+    BACKUP_DURATION="$duration"
+    BACKUP_HOSTNAME="$hostname_str"
+    BACKUP_STACK="$(basename "$STACK_DIR")"
+    BACKUP_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    BACKUP_SIZE="$(restic stats --json 2>/dev/null | jq -r '.total_size_formatted // empty' 2>/dev/null || echo "unknown")"
+    if [[ "$BACKUP_SIZE" == "unknown" || -z "$BACKUP_SIZE" ]]; then
+        # Fallback: human-readable from restic stats
+        BACKUP_SIZE="$(restic stats 2>/dev/null | grep 'Total Size' | awk '{print $3, $4}' || echo "unknown")"
+    fi
+
     ok "=== Backup complete (${duration}s) ==="
     echo ""
     restic snapshots --latest 1
+
+    # Post-hook
+    run_hook "$BACKUP_POST_HOOK" "post-hook"
 }
 
 cmd_list() {
@@ -665,6 +746,12 @@ Environment:
   BACKUP_KEEP_WEEKLY     Weekly snapshots to keep (default: 4)
   BACKUP_KEEP_MONTHLY    Monthly snapshots to keep (default: 3)
   BACKUP_EXCLUDE_VOLUMES Space-separated volume names to skip
+  BACKUP_POST_HOOK       Command after successful backup (optional)
+  BACKUP_FAIL_HOOK       Command after failed backup (optional)
+
+Hook variables (available in hook commands):
+  \$BACKUP_DURATION \$BACKUP_SIZE \$BACKUP_SNAPSHOT \$BACKUP_HOSTNAME
+  \$BACKUP_STACK \$BACKUP_TIMESTAMP \$BACKUP_ERROR (fail only)
 
 Example:
   export RESTIC_REPOSITORY=/backup/mystack

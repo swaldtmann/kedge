@@ -117,7 +117,40 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `BACKUP_KEEP_WEEKLY` | `4` | Weekly snapshots to keep |
 | `BACKUP_KEEP_MONTHLY` | `3` | Monthly snapshots to keep |
 | `BACKUP_EXCLUDE_VOLUMES` | — | Space-separated volume names to skip |
+| `BACKUP_POST_HOOK` | — | Command to run after successful backup |
+| `BACKUP_FAIL_HOOK` | — | Command to run after failed backup |
 | `RESTORE_TARGET` | `/opt/stack` | Where to restore the stack |
+
+## Post-Backup Hooks
+
+Run arbitrary commands after backup completes. Hook commands have access to context variables:
+
+| Variable | Content |
+|----------|---------|
+| `$BACKUP_DURATION` | Duration in seconds |
+| `$BACKUP_SIZE` | Repository size (human-readable) |
+| `$BACKUP_SNAPSHOT` | Snapshot ID |
+| `$BACKUP_HOSTNAME` | Server hostname |
+| `$BACKUP_STACK` | Stack directory basename |
+| `$BACKUP_TIMESTAMP` | ISO 8601 UTC timestamp |
+| `$BACKUP_ERROR` | Error message (fail hook only) |
+
+Examples:
+
+```bash
+# Healthchecks.io ping
+BACKUP_POST_HOOK='curl -sf https://hc-ping.com/your-uuid'
+BACKUP_FAIL_HOOK='curl -sf https://hc-ping.com/your-uuid/fail'
+
+# MQTT (e.g., KIgulls swarm monitoring)
+BACKUP_POST_HOOK='mosquitto_pub -h localhost -t health/backup -m "{\"status\":\"ok\",\"snapshot\":\"$BACKUP_SNAPSHOT\",\"duration\":$BACKUP_DURATION,\"size\":\"$BACKUP_SIZE\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
+
+# Slack webhook
+BACKUP_POST_HOOK='curl -sf -X POST -H "Content-Type: application/json" -d "{\"text\":\"Backup OK: $BACKUP_STACK ($BACKUP_SIZE, ${BACKUP_DURATION}s)\"}" https://hooks.slack.com/services/xxx'
+
+# Log to file
+BACKUP_POST_HOOK='echo "$BACKUP_TIMESTAMP ok $BACKUP_STACK $BACKUP_SNAPSHOT $BACKUP_SIZE ${BACKUP_DURATION}s" >> /var/log/dsb-results.log'
+```
 
 ## Roundtrip Test
 

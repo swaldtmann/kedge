@@ -202,8 +202,20 @@ ssh root@server "tail -20 /var/log/dsb-backup.log"
 ssh root@server ". /etc/dsb-backup.env && dsb-backup check"
 ```
 
-For alerting, wrap the cron command with your monitoring tool (e.g., Healthchecks.io, Uptime Kuma):
+### Post-Backup Hooks
 
-```cron
-0 3 * * * root . /etc/dsb-backup.env && /usr/local/bin/dsb-backup backup >> /var/log/dsb-backup.log 2>&1 && curl -s https://hc-ping.com/your-uuid
+The built-in hook mechanism is the recommended way to integrate monitoring. Add to `/etc/dsb-backup.env`:
+
+```bash
+# Healthchecks.io
+BACKUP_POST_HOOK='curl -sf https://hc-ping.com/your-uuid'
+BACKUP_FAIL_HOOK='curl -sf https://hc-ping.com/your-uuid/fail'
+
+# MQTT (for swarm-based monitoring)
+BACKUP_POST_HOOK='mosquitto_pub -h localhost -u agent -P "$MQTT_PASS" -t health/backup -m "{\"status\":\"ok\",\"snapshot\":\"$BACKUP_SNAPSHOT\",\"duration\":$BACKUP_DURATION,\"size\":\"$BACKUP_SIZE\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
+BACKUP_FAIL_HOOK='mosquitto_pub -h localhost -u agent -P "$MQTT_PASS" -t health/backup -m "{\"status\":\"fail\",\"error\":\"$BACKUP_ERROR\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
 ```
+
+Hook commands have access to context variables: `$BACKUP_DURATION`, `$BACKUP_SIZE`, `$BACKUP_SNAPSHOT`, `$BACKUP_HOSTNAME`, `$BACKUP_STACK`, `$BACKUP_TIMESTAMP`, `$BACKUP_ERROR` (fail hook only).
+
+Hooks are non-blocking: a failed hook logs a warning but does not affect the backup status.
