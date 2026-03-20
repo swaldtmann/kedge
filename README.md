@@ -130,6 +130,14 @@ export HCLOUD_TOKEN=<your-token>
 
 This creates two ephemeral VPS boxes, deploys a sample stack (Postgres + Valkey + Nginx), seeds test data, backs up, restores on a fresh box, verifies data integrity, and burns both.
 
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [Auto-Discovery](docs/auto-discovery.md) | How volumes, bind mounts, and databases are detected automatically |
+| [Bare-Metal Restore](docs/restore.md) | Full VPS recovery step by step |
+| [Integration Guide](docs/integration.md) | Embedding backup into your provisioning pipeline (cron, config, scripts) |
+
 ## Prerequisites
 
 - `docker` (with compose v2 plugin)
