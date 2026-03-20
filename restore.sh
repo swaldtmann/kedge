@@ -195,39 +195,63 @@ cmd_restore() {
 
     # Phase 4: Create Docker volumes and import data
     info "--- Phase 4: Restore Docker volumes ---"
-    if [[ -d "$backup_root/volumes" ]]; then
-        for vol_archive in "$backup_root/volumes/"*.tar.gz; do
-            [[ -f "$vol_archive" ]] || continue
-            local vol_name
-            vol_name="$(basename "$vol_archive" .tar.gz)"
 
-            # Determine the full volume name (with compose project prefix)
-            # Check meta.json for original mapping
-            local real_vol_name
-            real_vol_name="$(jq -r --arg v "$vol_name" '.volume_mapping[$v] // ""' "$backup_root/meta.json")"
+    # Read volume mappings from metadata
+    local vol_mapping vol_paths
+    vol_mapping="$(jq -r '.volume_mapping // {}' "$backup_root/meta.json" 2>/dev/null || echo '{}')"
+    vol_paths="$(jq -r '.volume_paths // {}' "$backup_root/meta.json" 2>/dev/null || echo '{}')"
 
-            if [[ -z "$real_vol_name" ]]; then
-                # Fallback: use compose project name + volume name
-                local project_name
-                project_name="$(basename "$RESTORE_TARGET" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')"
-                real_vol_name="${project_name}_${vol_name}"
-            fi
+    local vol_count=0
+    for vol_name in $(echo "$vol_mapping" | jq -r 'keys[]' 2>/dev/null); do
+        local real_vol_name
+        real_vol_name="$(echo "$vol_mapping" | jq -r --arg v "$vol_name" '.[$v]')"
 
-            info "Restoring volume: $vol_name -> $real_vol_name"
+        if [[ -z "$real_vol_name" || "$real_vol_name" == "null" ]]; then
+            local project_name
+            project_name="$(basename "$RESTORE_TARGET" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')"
+            real_vol_name="${project_name}_${vol_name}"
+        fi
 
-            # Create volume if needed
-            docker volume create "$real_vol_name" >/dev/null 2>&1 || true
+        # Create volume
+        docker volume create "$real_vol_name" >/dev/null 2>&1 || true
+        local new_vol_path
+        new_vol_path="$(docker volume inspect --format '{{.Mountpoint}}' "$real_vol_name" 2>/dev/null)"
 
-            # Import data
+        # Source 1: Direct volume path in restic snapshot (block-level dedup backup)
+        local orig_vol_path
+        orig_vol_path="$(echo "$vol_paths" | jq -r --arg v "$vol_name" '.[$v] // empty' 2>/dev/null)"
+        local restored_vol_dir=""
+        if [[ -n "$orig_vol_path" ]]; then
+            # Find the restored volume data in the staging dir (restic preserves full paths)
+            restored_vol_dir="$(find "$STAGING_DIR" -path "*${orig_vol_path}" -type d 2>/dev/null | head -1)"
+        fi
+
+        if [[ -n "$restored_vol_dir" && -d "$restored_vol_dir" ]]; then
+            info "Restoring volume: $vol_name -> $real_vol_name [direct]"
+            rsync -a --delete "$restored_vol_dir/" "$new_vol_path/"
+            ok "  $real_vol_name restored [direct]"
+
+        # Source 2: tar.gz fallback (from collect_volumes fallback path)
+        elif [[ -f "$backup_root/volumes/${vol_name}.tar.gz" ]]; then
+            info "Restoring volume: $vol_name -> $real_vol_name [tar]"
             docker run --rm \
                 -v "$real_vol_name":/data \
-                -v "$(dirname "$vol_archive")":/backup:ro \
-                alpine sh -c "rm -rf /data/* /data/..?* /data/.[!.]* 2>/dev/null; tar xzf /backup/$(basename "$vol_archive") -C /data"
+                -v "$backup_root/volumes":/backup:ro \
+                alpine sh -c "rm -rf /data/* /data/..?* /data/.[!.]* 2>/dev/null; tar xzf /backup/${vol_name}.tar.gz -C /data"
+            ok "  $real_vol_name restored [tar]"
 
-            ok "  $real_vol_name restored"
-        done
-    else
+        else
+            warn "  No data found for volume $vol_name — skipping"
+            continue
+        fi
+
+        vol_count=$((vol_count + 1))
+    done
+
+    if [[ $vol_count -eq 0 ]]; then
         info "No volumes to restore"
+    else
+        ok "$vol_count volume(s) restored"
     fi
 
     if $verify_only; then

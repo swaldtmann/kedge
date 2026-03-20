@@ -209,6 +209,12 @@ resolve_volume_name() {
     docker volume ls --format '{{.Name}}' | grep -E "(^|[-_])${pattern}$" | head -1
 }
 
+# Get the host mountpoint for a Docker volume
+resolve_volume_path() {
+    local vol_name="$1"
+    docker volume inspect --format '{{.Mountpoint}}' "$vol_name" 2>/dev/null
+}
+
 # Check if a volume should be excluded
 is_excluded_volume() {
     local vol="$1"
@@ -333,15 +339,20 @@ run_pre_hooks() {
 }
 
 # ---------------------------------------------------------------------------
-# Volume export
+# Volume collection
 # ---------------------------------------------------------------------------
 
-export_volumes() {
-    local config="$1"
-    local vol_dir="$2"
-    mkdir -p "$vol_dir"
+# Collected volume paths for restic (populated by collect_volumes)
+VOLUME_BACKUP_PATHS=()
 
+collect_volumes() {
+    local config="$1"
+    local vol_map_dir="$2"
+    mkdir -p "$vol_map_dir"
+
+    VOLUME_BACKUP_PATHS=()
     local count=0
+
     while IFS= read -r vol_name; do
         if [[ -z "$vol_name" ]]; then continue; fi
         if is_excluded_volume "$vol_name"; then
@@ -357,19 +368,31 @@ export_volumes() {
             continue
         fi
 
-        info "Exporting volume: $real_vol..."
-        docker run --rm \
-            -v "$real_vol":/data:ro \
-            -v "$vol_dir":/backup \
-            alpine tar czf "/backup/${vol_name}.tar.gz" -C /data . 2>/dev/null
+        # Get host mountpoint
+        local vol_path
+        vol_path="$(resolve_volume_path "$real_vol")"
+        if [[ -z "$vol_path" || ! -d "$vol_path" ]]; then
+            warn "Volume '$real_vol' mountpoint not accessible — falling back to tar export"
+            # Fallback: tar.gz export (e.g., non-local volume drivers)
+            docker run --rm \
+                -v "$real_vol":/data:ro \
+                -v "$vol_map_dir":/backup \
+                alpine tar czf "/backup/${vol_name}.tar.gz" -C /data . 2>/dev/null
+            local size
+            size="$(du -h "$vol_map_dir/${vol_name}.tar.gz" | cut -f1)"
+            ok "  $real_vol -> ${vol_name}.tar.gz ($size) [tar fallback]"
+        else
+            # Direct path: restic will back up with block-level dedup
+            VOLUME_BACKUP_PATHS+=("$vol_path")
+            local size
+            size="$(du -sh "$vol_path" 2>/dev/null | cut -f1)"
+            ok "  $real_vol -> $vol_path ($size) [direct]"
+        fi
 
-        local size
-        size="$(du -h "$vol_dir/${vol_name}.tar.gz" | cut -f1)"
-        ok "  $real_vol -> ${vol_name}.tar.gz ($size)"
         count=$((count + 1))
     done < <(discover_volumes "$config")
 
-    ok "$count volume(s) exported"
+    ok "$count volume(s) collected"
 }
 
 # ---------------------------------------------------------------------------
@@ -468,14 +491,20 @@ write_metadata() {
     containers="$(cd "$STACK_DIR" && $COMPOSE_CMD ps --format json 2>/dev/null \
         | jq -s '[.[] | {name: .Name, image: .Image, state: .State}]' 2>/dev/null || echo '[]')"
 
-    # Collect volume mapping
+    # Collect volume mapping + path mapping
     local vol_map="{}"
+    local vol_paths="{}"
     while IFS= read -r vol_name; do
         if [[ -z "$vol_name" ]]; then continue; fi
         local real_vol
         real_vol="$(resolve_volume_name "$vol_name")"
         if [[ -n "$real_vol" ]]; then
             vol_map="$(echo "$vol_map" | jq --arg k "$vol_name" --arg v "$real_vol" '. + {($k): $v}')"
+            local vol_path
+            vol_path="$(resolve_volume_path "$real_vol")"
+            if [[ -n "$vol_path" ]]; then
+                vol_paths="$(echo "$vol_paths" | jq --arg k "$vol_name" --arg v "$vol_path" '. + {($k): $v}')"
+            fi
         fi
     done < <(discover_volumes "$config")
 
@@ -488,6 +517,7 @@ write_metadata() {
     "compose_cmd": "$COMPOSE_CMD",
     "containers": $containers,
     "volume_mapping": $vol_map,
+    "volume_paths": $vol_paths,
     "docker_version": "$(docker --version 2>/dev/null | head -1)"
 }
 METAEOF
@@ -579,7 +609,19 @@ cmd_discover() {
         real="$(resolve_volume_name "$vol")"
         local excl=""
         if is_excluded_volume "$vol"; then excl=" [EXCLUDED]"; fi
-        echo "  $vol  -> ${real:-NOT FOUND}$excl"
+        local vol_info="${real:-NOT FOUND}"
+        if [[ -n "$real" ]]; then
+            local vpath
+            vpath="$(resolve_volume_path "$real")"
+            if [[ -n "$vpath" && -d "$vpath" ]]; then
+                local vsize
+                vsize="$(du -sh "$vpath" 2>/dev/null | cut -f1)"
+                vol_info="$real ($vpath, $vsize) [direct]"
+            else
+                vol_info="$real [tar fallback]"
+            fi
+        fi
+        echo "  $vol  -> $vol_info$excl"
     done < <(discover_volumes "$config")
 
     echo ""
@@ -631,10 +673,10 @@ cmd_backup() {
     info "--- Phase 1: Database dumps ---"
     run_pre_hooks "$config" "$STAGING_DIR/dumps"
 
-    # Phase 2: Stop stack for consistent volume export
-    info "--- Phase 2: Volume export ---"
+    # Phase 2: Stop stack + collect volumes
+    info "--- Phase 2: Volume collection ---"
     stop_stack
-    export_volumes "$config" "$STAGING_DIR/volumes"
+    collect_volumes "$config" "$STAGING_DIR/volumes"
 
     # Phase 3: Collect stack files
     info "--- Phase 3: Stack files ---"
@@ -643,35 +685,30 @@ cmd_backup() {
     # Phase 4: Metadata
     write_metadata "$config" "$STAGING_DIR"
 
-    # Phase 5: Restart stack (before restic upload — can take a while)
-    start_stack
-    STACK_WAS_RUNNING=false  # prevent double-start in cleanup
-
-    # Phase 6: restic backup
-    info "--- Phase 4: Restic backup ---"
+    # Phase 5: restic backup (staging dir + direct volume paths)
+    # Stack stays stopped during restic for consistency — restic is fast
+    # because it deduplicates at block level (no tar overhead)
+    info "--- Phase 5: Restic backup ---"
     local hostname_str
     hostname_str="$(hostname -f 2>/dev/null || hostname)"
 
-    local restic_output
-    restic_output="$(restic backup "$STAGING_DIR" \
+    # Build backup path list: staging dir + direct volume paths
+    local backup_paths=("$STAGING_DIR")
+    for vp in "${VOLUME_BACKUP_PATHS[@]}"; do
+        backup_paths+=("$vp")
+    done
+
+    restic backup "${backup_paths[@]}" \
         --tag "docker-stack-backup" \
         --tag "stack:$(basename "$STACK_DIR")" \
-        --host "$hostname_str" \
-        --json 2>/dev/null || true)"
+        --host "$hostname_str"
 
-    # Try to extract snapshot ID from JSON output, fall back to non-JSON
-    BACKUP_SNAPSHOT="$(echo "$restic_output" | jq -r 'select(.message_type == "summary") .snapshot_id // empty' 2>/dev/null || true)"
-    if [[ -z "$BACKUP_SNAPSHOT" ]]; then
-        # Fallback: run without --json
-        restic backup "$STAGING_DIR" \
-            --tag "docker-stack-backup" \
-            --tag "stack:$(basename "$STACK_DIR")" \
-            --host "$hostname_str"
-        BACKUP_SNAPSHOT="$(restic snapshots --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty' 2>/dev/null || echo "unknown")"
-    else
-        # Show the output
-        echo "$restic_output" | jq -r 'select(.message_type == "summary") | "snapshot \(.snapshot_id) saved"' 2>/dev/null || true
-    fi
+    BACKUP_SNAPSHOT="$(restic snapshots --latest 1 --json 2>/dev/null \
+        | jq -r '.[0].short_id // empty' 2>/dev/null || echo "unknown")"
+
+    # Phase 6: Restart stack
+    start_stack
+    STACK_WAS_RUNNING=false  # prevent double-start in cleanup
 
     # Cleanup staging
     rm -rf "$STAGING_DIR"
