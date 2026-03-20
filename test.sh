@@ -32,7 +32,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
 HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cx22}"
+TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cpx22}"
 TEST_LOCATION="${TEST_LOCATION:-nbg1}"
 TEST_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
@@ -51,11 +51,11 @@ BACKUP_PASSWORD="test-backup-$(openssl rand -hex 8)"
 # Logging
 # ---------------------------------------------------------------------------
 
-_log()  { echo "[$(date '+%H:%M:%S')] $1  $2"; }
+_log()  { echo "[$(date '+%H:%M:%S')] $1  $2" >&2; }
 info()  { _log "==>" "$*"; }
 ok()    { _log " ok" "$*"; }
 warn()  { _log "wrn" "$*"; }
-err()   { _log "ERR" "$*" >&2; }
+err()   { _log "ERR" "$*"; }
 die()   { err "$1"; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -112,17 +112,40 @@ wait_for_ssh() {
 
 create_box() {
     local name="$1"
-    info "Creating $name ($TEST_SERVER_TYPE, $TEST_LOCATION)..."
-    hcloud server create \
-        --name "$name" \
-        --type "$TEST_SERVER_TYPE" \
-        --image "$TEST_IMAGE" \
-        --location "$TEST_LOCATION" \
-        --ssh-key "$SSH_KEY_NAME" \
-        --label "purpose=dsb-test" >/dev/null
+
+    # Fallback: try multiple type/location combinations (DE only)
+    local types=("$TEST_SERVER_TYPE" cpx22 cpx21 cax11)
+    local locations=("$TEST_LOCATION" nbg1 fsn1)
+    local created=false
+
+    for stype in "${types[@]}"; do
+        for loc in "${locations[@]}"; do
+            info "Trying $name ($stype, $loc)..."
+            if hcloud server create \
+                --name "$name" \
+                --type "$stype" \
+                --image "$TEST_IMAGE" \
+                --location "$loc" \
+                --ssh-key "$SSH_KEY_NAME" \
+                --label "purpose=dsb-test" >/dev/null 2>&1; then
+                created=true
+                ok "Server $name created ($stype, $loc)"
+                break 2
+            fi
+            # Clean up failed attempt
+            hcloud server delete "$name" 2>/dev/null || true
+        done
+    done
+
+    if ! $created; then
+        die "Could not create server $name — all type/location combinations failed"
+    fi
 
     local ip
-    ip="$(hcloud server list -o columns=name,ipv4 | grep "^$name " | awk '{print $2}')"
+    ip="$(hcloud server list -o columns=name,ipv4 | grep "^${name} " | awk '{print $2}')"
+    if [[ -z "$ip" ]]; then
+        die "Could not get IP for $name"
+    fi
     echo "$ip"
 }
 
@@ -548,10 +571,12 @@ Host restore-target
     StrictHostKeyChecking accept-new
 SSHCFG"
 
+    # Create target directory on Box B
+    ssh_box "$BOX_B_IP" "mkdir -p /backup/test-repo"
+
     ssh_box "$BOX_A_IP" bash -s -- "$BOX_B_IP" <<'XFER'
 set -euo pipefail
 DST="$1"
-mkdir -p /backup/test-repo
 rsync -az -e "ssh -i /root/.ssh/transfer_key -o StrictHostKeyChecking=accept-new" \
     /backup/test-repo/ "root@${DST}:/backup/test-repo/"
 echo "Transfer done"

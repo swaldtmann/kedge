@@ -103,7 +103,9 @@ check_prereqs() {
     fi
 
     export RESTIC_REPOSITORY RESTIC_PASSWORD
-    [[ -n "${RESTIC_PASSWORD_FILE:-}" ]] && export RESTIC_PASSWORD_FILE
+    if [[ -n "${RESTIC_PASSWORD_FILE:-}" ]]; then
+        export RESTIC_PASSWORD_FILE
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -184,10 +186,10 @@ run_pre_hooks() {
     local hooks_run=0
 
     while IFS=$'\t' read -r svc image; do
-        [[ -z "$svc" ]] && continue
+        if [[ -z "$svc" ]]; then continue; fi
         local db_type
         db_type="$(detect_db_type "$image")"
-        [[ -z "$db_type" ]] && continue
+        if [[ -z "$db_type" ]]; then continue; fi
 
         # Find running container for this service
         local container
@@ -285,7 +287,7 @@ export_volumes() {
 
     local count=0
     while IFS= read -r vol_name; do
-        [[ -z "$vol_name" ]] && continue
+        if [[ -z "$vol_name" ]]; then continue; fi
         if is_excluded_volume "$vol_name"; then
             info "Skipping excluded volume: $vol_name"
             continue
@@ -342,7 +344,7 @@ collect_stack_files() {
     # Bind mounts outside stack dir: copy separately
     local external_mounts=()
     while IFS= read -r mount_src; do
-        [[ -z "$mount_src" ]] && continue
+        if [[ -z "$mount_src" ]]; then continue; fi
         # Resolve relative to stack dir
         local abs_mount
         if [[ "$mount_src" == /* ]]; then
@@ -413,7 +415,7 @@ write_metadata() {
     # Collect volume mapping
     local vol_map="{}"
     while IFS= read -r vol_name; do
-        [[ -z "$vol_name" ]] && continue
+        if [[ -z "$vol_name" ]]; then continue; fi
         local real_vol
         real_vol="$(resolve_volume_name "$vol_name")"
         if [[ -n "$real_vol" ]]; then
@@ -505,7 +507,7 @@ cmd_discover() {
         local db_type
         db_type="$(detect_db_type "$image")"
         local hook_info=""
-        [[ -n "$db_type" ]] && hook_info=" [pre-hook: $db_type]"
+        if [[ -n "$db_type" ]]; then hook_info=" [pre-hook: $db_type]"; fi
         echo "  $svc  ($image)$hook_info"
     done < <(discover_services "$config")
 
@@ -515,16 +517,16 @@ cmd_discover() {
         local real
         real="$(resolve_volume_name "$vol")"
         local excl=""
-        is_excluded_volume "$vol" && excl=" [EXCLUDED]"
+        if is_excluded_volume "$vol"; then excl=" [EXCLUDED]"; fi
         echo "  $vol  -> ${real:-NOT FOUND}$excl"
     done < <(discover_volumes "$config")
 
     echo ""
     echo "--- Bind Mounts ---"
     while IFS= read -r mount; do
-        [[ -z "$mount" ]] && continue
+        if [[ -z "$mount" ]]; then continue; fi
         local exists="exists"
-        [[ ! -e "$mount" ]] && exists="NOT FOUND"
+        if [[ ! -e "$mount" ]]; then exists="NOT FOUND"; fi
         echo "  $mount  [$exists]"
     done < <(discover_bind_mounts "$config")
 
@@ -532,13 +534,13 @@ cmd_discover() {
     echo "--- Compose Files ---"
     for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml \
              docker-compose.override.yml docker-compose.override.yaml; do
-        [[ -f "$STACK_DIR/$f" ]] && echo "  $f"
+        if [[ -f "$STACK_DIR/$f" ]]; then echo "  $f"; fi
     done
 
     echo ""
     echo "--- Env Files ---"
     for f in .env .env.local .env.production; do
-        [[ -f "$STACK_DIR/$f" ]] && echo "  $f"
+        if [[ -f "$STACK_DIR/$f" ]]; then echo "  $f"; fi
     done
     echo ""
 }

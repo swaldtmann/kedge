@@ -66,12 +66,17 @@ check_prereqs() {
         die "Neither 'docker compose' nor 'docker-compose' found"
     fi
 
-    [[ -z "$RESTIC_REPOSITORY" ]] && die "RESTIC_REPOSITORY not set"
-    [[ -z "$RESTIC_PASSWORD" && -z "${RESTIC_PASSWORD_FILE:-}" ]] && \
+    if [[ -z "$RESTIC_REPOSITORY" ]]; then
+        die "RESTIC_REPOSITORY not set"
+    fi
+    if [[ -z "$RESTIC_PASSWORD" && -z "${RESTIC_PASSWORD_FILE:-}" ]]; then
         die "RESTIC_PASSWORD or RESTIC_PASSWORD_FILE not set"
+    fi
 
     export RESTIC_REPOSITORY RESTIC_PASSWORD
-    [[ -n "${RESTIC_PASSWORD_FILE:-}" ]] && export RESTIC_PASSWORD_FILE
+    if [[ -n "${RESTIC_PASSWORD_FILE:-}" ]]; then
+        export RESTIC_PASSWORD_FILE
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -247,7 +252,7 @@ cmd_restore() {
         local db_services=()
 
         while IFS=$'\t' read -r svc image; do
-            [[ -z "$svc" ]] && continue
+            if [[ -z "$svc" ]]; then continue; fi
             case "$image" in
                 *postgres*|*postgis*|*mariadb*|*mysql*|*mongo*)
                     db_services+=("$svc")
