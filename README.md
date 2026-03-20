@@ -121,6 +121,7 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `BACKUP_EXCLUDE_VOLUMES` | — | Space-separated volume names to skip |
 | `BACKUP_POST_HOOK` | — | Command to run after successful backup |
 | `BACKUP_FAIL_HOOK` | — | Command to run after failed backup |
+| `BACKUP_HEALTHCHECK_URL` | — | Ping on success, `/fail` on error |
 | `RESTORE_TARGET` | `/opt/stack` | Where to restore the stack |
 
 ## Post-Backup Hooks
@@ -153,6 +154,14 @@ BACKUP_POST_HOOK='curl -sf -X POST -H "Content-Type: application/json" -d "{\"te
 # Log to file
 BACKUP_POST_HOOK='echo "$BACKUP_TIMESTAMP ok $BACKUP_STACK $BACKUP_SNAPSHOT $BACKUP_SIZE ${BACKUP_DURATION}s" >> /var/log/dsb-results.log'
 ```
+
+Or skip hooks entirely and just set a URL — works with Healthchecks.io, Uptime Kuma, Cronitor:
+
+```bash
+BACKUP_HEALTHCHECK_URL=https://hc-ping.com/your-uuid
+```
+
+Pings the URL on success (with duration + size in body), appends `/fail` on error. No hook config needed.
 
 ## Roundtrip Test
 

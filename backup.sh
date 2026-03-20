@@ -28,6 +28,7 @@
 #   BACKUP_EXCLUDE_VOLUMES  Space-separated volume names to skip
 #   BACKUP_POST_HOOK      Command to run after successful backup (optional)
 #   BACKUP_FAIL_HOOK      Command to run after failed backup (optional)
+#   BACKUP_HEALTHCHECK_URL  URL to ping after backup (Healthchecks.io, Uptime Kuma, etc.)
 #
 # Hook variables (expanded in BACKUP_POST_HOOK / BACKUP_FAIL_HOOK):
 #   $BACKUP_DURATION      Backup duration in seconds
@@ -58,6 +59,7 @@ BACKUP_KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-3}"
 BACKUP_EXCLUDE_VOLUMES="${BACKUP_EXCLUDE_VOLUMES:-}"
 BACKUP_POST_HOOK="${BACKUP_POST_HOOK:-}"
 BACKUP_FAIL_HOOK="${BACKUP_FAIL_HOOK:-}"
+BACKUP_HEALTHCHECK_URL="${BACKUP_HEALTHCHECK_URL:-}"
 
 # Internal
 STAGING_DIR=""
@@ -106,6 +108,30 @@ run_hook() {
     else
         warn "$hook_name failed (exit $?) — continuing"
     fi
+}
+
+# Ping a healthcheck URL with status + context in the body
+ping_healthcheck() {
+    local status="$1"  # "ok" or "fail"
+
+    if [[ -z "$BACKUP_HEALTHCHECK_URL" ]]; then
+        return 0
+    fi
+
+    local url="$BACKUP_HEALTHCHECK_URL"
+    if [[ "$status" == "fail" ]]; then
+        url="${url%/}/fail"
+    fi
+
+    local body
+    body="host=$BACKUP_HOSTNAME stack=$BACKUP_STACK snapshot=$BACKUP_SNAPSHOT duration=${BACKUP_DURATION}s size=$BACKUP_SIZE"
+    if [[ "$status" == "fail" && -n "$BACKUP_ERROR" ]]; then
+        body="error: $BACKUP_ERROR | $body"
+    fi
+
+    # Silent, non-blocking, 10s timeout
+    curl -sf --max-time 10 -X POST --data-raw "$body" "$url" >/dev/null 2>&1 || true
+    ok "Healthcheck ping: $status"
 }
 
 # ---------------------------------------------------------------------------
@@ -570,6 +596,7 @@ cleanup() {
         BACKUP_STACK="$(basename "$STACK_DIR")"
         BACKUP_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         run_hook "$BACKUP_FAIL_HOOK" "fail-hook" || true
+        ping_healthcheck "fail" || true
     fi
 }
 
@@ -735,6 +762,7 @@ cmd_backup() {
 
     # Post-hook
     run_hook "$BACKUP_POST_HOOK" "post-hook"
+    ping_healthcheck "ok"
 }
 
 cmd_list() {
@@ -795,6 +823,7 @@ Environment:
   BACKUP_EXCLUDE_VOLUMES Space-separated volume names to skip
   BACKUP_POST_HOOK       Command after successful backup (optional)
   BACKUP_FAIL_HOOK       Command after failed backup (optional)
+  BACKUP_HEALTHCHECK_URL Ping URL on success, URL/fail on error
 
 Hook variables (available in hook commands):
   \$BACKUP_DURATION \$BACKUP_SIZE \$BACKUP_SNAPSHOT \$BACKUP_HOSTNAME
