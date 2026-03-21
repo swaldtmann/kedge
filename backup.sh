@@ -285,7 +285,7 @@ run_pre_hooks() {
                 info "Dumping PostgreSQL ($container_name)..."
                 local pg_user
                 pg_user="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                    | grep '^POSTGRES_USER=' | cut -d= -f2)"
+                    | grep '^POSTGRES_USER=' | cut -d= -f2 || true)"
                 pg_user="${pg_user:-postgres}"
                 docker exec "$container" pg_dumpall -U "$pg_user" \
                     | gzip > "$dump_dir/${svc}_postgres.sql.gz"
