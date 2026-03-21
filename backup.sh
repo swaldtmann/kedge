@@ -229,6 +229,77 @@ detect_db_type() {
     esac
 }
 
+# Check if a service image is known to be crash-consistent (safe for hot backup
+# without a pre-hook). These services either use append-only storage, have
+# built-in WAL/journal recovery, or are stateless/read-only by nature.
+is_hot_safe_image() {
+    local image="$1"
+    case "$image" in
+        # Monitoring / metrics (append-only, crash-tolerant WAL)
+        *prometheus*|*grafana*|*loki*|*alertmanager*|*victoriametrics*)
+            return 0 ;;
+        # Reverse proxies / routers (config-driven, no persistent state)
+        *traefik*|*nginx*|*caddy*|*haproxy*)
+            return 0 ;;
+        # Auth / SSO (config-driven or embedded DB with WAL)
+        *authelia*|*lldap*|*keycloak*|*dex*)
+            return 0 ;;
+        # Security (stateless agents or crash-tolerant)
+        *crowdsec*)
+            return 0 ;;
+        # Read-later / bookmarks (SQLite with WAL)
+        *readeck*|*wallabag*|*linkding*)
+            return 0 ;;
+        # MQTT brokers (QoS state rebuilt on restart)
+        *mosquitto*|*emqx*|*vernemq*)
+            return 0 ;;
+        # Message queues with persistence (fsync/journal)
+        *rabbitmq*|*nats*)
+            return 0 ;;
+        # Wikis / CMS (file-based or embedded DB with recovery)
+        *xwiki*|*bookstack*|*wiki.js*)
+            return 0 ;;
+        # Mail (journal-based storage)
+        *mailcow*|*dovecot*|*mailserver*|*stalwart*)
+            return 0 ;;
+        # Password managers (SQLite with WAL)
+        *vaultwarden*|*bitwarden*)
+            return 0 ;;
+        # Misc tools (embedded DBs, crash-tolerant)
+        *listmonk*|*n8n*|*gitea*|*forgejo*|*miniflux*|*freshrss*)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
+# Check all services for hot-backup safety. Returns count of unsafe services.
+# Output: one warning line per unsafe service to stderr.
+check_hot_safety() {
+    local config="$1"
+    local unsafe=0
+
+    while IFS=$'\t' read -r svc image; do
+        if [[ -z "$svc" ]]; then continue; fi
+        local db_type
+        db_type="$(detect_db_type "$image")"
+        # Has a pre-hook → safe (dump runs while stack is up)
+        if [[ -n "$db_type" ]]; then continue; fi
+        # Known crash-consistent → safe
+        if is_hot_safe_image "$image"; then continue; fi
+        # Build images → can't classify
+        if [[ "$image" == "build" ]]; then
+            warn "Service '$svc' uses a build image — verify hot-backup safety manually"
+            unsafe=$((unsafe + 1))
+            continue
+        fi
+        warn "Service '$svc' ($image) has no pre-hook and is not known to be crash-consistent"
+        unsafe=$((unsafe + 1))
+    done < <(discover_services "$config")
+
+    [[ $unsafe -eq 0 ]]
+}
+
 # Get actual Docker volume name (compose may prefix with project name)
 resolve_volume_name() {
     local pattern="$1"
@@ -626,10 +697,26 @@ cmd_discover() {
     while IFS=$'\t' read -r svc image; do
         local db_type
         db_type="$(detect_db_type "$image")"
-        local hook_info=""
-        if [[ -n "$db_type" ]]; then hook_info=" [pre-hook: $db_type]"; fi
-        echo "  $svc  ($image)$hook_info"
+        local status_info=""
+        if [[ -n "$db_type" ]]; then
+            status_info=" [pre-hook: $db_type]"
+        elif is_hot_safe_image "$image"; then
+            status_info=" [hot-safe]"
+        elif [[ "$image" == "build" ]]; then
+            status_info=" [build — verify manually]"
+        fi
+        echo "  $svc  ($image)$status_info"
     done < <(discover_services "$config")
+
+    echo ""
+    echo "--- Hot Backup Safety ---"
+    if check_hot_safety "$config"; then
+        echo "  All services have pre-hooks or are known crash-consistent"
+        echo "  BACKUP_STOP_STACK=false is safe for this stack"
+    else
+        echo "  Some services may not be safe for hot backup (see warnings above)"
+        echo "  Review before setting BACKUP_STOP_STACK=false"
+    fi
 
     echo ""
     echo "--- Named Volumes ---"
@@ -688,6 +775,9 @@ cmd_backup() {
     info "=== Backup started ==="
     info "Stack: $STACK_DIR"
     info "Target: $RESTIC_REPOSITORY"
+    if [[ "$BACKUP_STOP_STACK" != "true" ]]; then
+        info "Mode: HOT BACKUP (stack stays running)"
+    fi
 
     local start_time
     start_time="$(date +%s)"
@@ -697,6 +787,13 @@ cmd_backup() {
 
     local config
     config="$(compose_config)"
+
+    # Hot backup safety check
+    if [[ "$BACKUP_STOP_STACK" != "true" ]]; then
+        if ! check_hot_safety "$config"; then
+            warn "Proceeding with hot backup despite unsafe services — data may be inconsistent"
+        fi
+    fi
 
     # Phase 1: Pre-hooks (DB dumps while stack is running)
     info "--- Phase 1: Database dumps ---"
@@ -818,7 +915,7 @@ Environment:
                                    s3:s3.amazonaws.com/bucket/mystack
   RESTIC_PASSWORD        Encryption password (required)
   RESTIC_PASSWORD_FILE   Alternative: path to password file
-  BACKUP_STOP_STACK      Stop stack during volume export (default: true)
+  BACKUP_STOP_STACK      Stop stack during backup (default: true, false=hot backup)
   BACKUP_KEEP_DAILY      Daily snapshots to keep (default: 7)
   BACKUP_KEEP_WEEKLY     Weekly snapshots to keep (default: 4)
   BACKUP_KEEP_MONTHLY    Monthly snapshots to keep (default: 3)

@@ -114,7 +114,7 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `RESTIC_REPOSITORY` | — | restic repository (required) |
 | `RESTIC_PASSWORD` | — | Encryption password (required) |
 | `RESTIC_PASSWORD_FILE` | — | Alternative: file with password |
-| `BACKUP_STOP_STACK` | `true` | Stop stack during volume export |
+| `BACKUP_STOP_STACK` | `true` | Stop stack during backup (`false` = hot backup, see below) |
 | `BACKUP_KEEP_DAILY` | `7` | Daily snapshots to keep |
 | `BACKUP_KEEP_WEEKLY` | `4` | Weekly snapshots to keep |
 | `BACKUP_KEEP_MONTHLY` | `3` | Monthly snapshots to keep |
@@ -162,6 +162,74 @@ BACKUP_HEALTHCHECK_URL=https://hc-ping.com/your-uuid
 ```
 
 Pings the URL on success (with duration + size in body), appends `/fail` on error. No hook config needed.
+
+## Hot Backup (Zero Downtime)
+
+By default, `backup.sh` stops the stack during volume export for full consistency. Set `BACKUP_STOP_STACK=false` for zero-downtime backups where the stack keeps running.
+
+```bash
+BACKUP_STOP_STACK=false ./backup.sh backup
+```
+
+### How it works
+
+- **Phase 1 (database dumps)** already runs while the stack is up — `pg_dumpall`, `mysqldump`, `BGSAVE` produce consistent snapshots by design
+- **Phase 2 (volume export)** runs without stopping containers — volume data must be crash-consistent
+- Restic's block-level dedup handles changing files gracefully
+
+### Safety classification
+
+Run `discover` to see the safety classification for each service:
+
+```
+$ ./backup.sh discover
+--- Services ---
+  postgres  (postgres:16)  [pre-hook: postgres]
+  valkey    (valkey/valkey:8)  [pre-hook: valkey]
+  grafana   (grafana/grafana:11)  [hot-safe]
+  traefik   (traefik:v3)  [hot-safe]
+  myapp     (myapp:latest)
+
+--- Hot Backup Safety ---
+  wrn  Service 'myapp' (myapp:latest) has no pre-hook and is not known to be crash-consistent
+  Some services may not be safe for hot backup (see warnings above)
+  Review before setting BACKUP_STOP_STACK=false
+```
+
+| Classification | Meaning |
+|----------------|---------|
+| `[pre-hook: X]` | Database dump runs before backup — always consistent |
+| `[hot-safe]` | Known crash-consistent (WAL, append-only, stateless, or config-driven) |
+| `[build — verify manually]` | Custom image, can't auto-classify |
+| *(no tag)* | Unknown — review before enabling hot backup |
+
+### Known hot-safe service types
+
+Services with built-in crash recovery or no mutable state:
+
+- **Monitoring**: Prometheus, Grafana, Loki, Alertmanager, VictoriaMetrics
+- **Reverse proxies**: Traefik, Nginx, Caddy, HAProxy
+- **Auth/SSO**: Authelia, LLDAP, Keycloak, Dex
+- **Security**: CrowdSec
+- **Bookmarks/Read-later**: Readeck, Wallabag, Linkding (SQLite WAL)
+- **MQTT brokers**: Mosquitto, EMQX, VerneMQ
+- **Message queues**: RabbitMQ, NATS
+- **Wikis**: XWiki, BookStack, Wiki.js
+- **Mail**: Dovecot, Stalwart, Mailcow
+- **Password managers**: Vaultwarden (SQLite WAL)
+- **Misc**: Listmonk, n8n, Gitea, Forgejo, Miniflux, FreshRSS
+
+### When to use hot backup
+
+- Stacks where all services have pre-hooks or are known hot-safe
+- Uptime-critical deployments where even brief downtime is unacceptable
+- When `discover` shows no unclassified services (or you've verified them manually)
+
+### When NOT to use hot backup
+
+- Services writing multi-file transactions without journaling
+- Custom applications without crash recovery
+- If in doubt: keep the default (`BACKUP_STOP_STACK=true`)
 
 ## Roundtrip Test
 
