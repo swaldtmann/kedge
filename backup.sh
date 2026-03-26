@@ -26,6 +26,7 @@
 #   BACKUP_KEEP_WEEKLY    Retention: weekly snapshots to keep (default: 4)
 #   BACKUP_KEEP_MONTHLY   Retention: monthly snapshots to keep (default: 3)
 #   BACKUP_EXCLUDE_VOLUMES  Space-separated volume names to skip
+#   BACKUP_EXCLUDE_MOUNTS  Space-separated bind-mount paths to skip (e.g. "/ /proc /sys")
 #   BACKUP_POST_HOOK      Command to run after successful backup (optional)
 #   BACKUP_FAIL_HOOK      Command to run after failed backup (optional)
 #   BACKUP_HEALTHCHECK_URL  URL to ping after backup (Healthchecks.io, Uptime Kuma, etc.)
@@ -57,6 +58,7 @@ BACKUP_KEEP_DAILY="${BACKUP_KEEP_DAILY:-7}"
 BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-4}"
 BACKUP_KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-3}"
 BACKUP_EXCLUDE_VOLUMES="${BACKUP_EXCLUDE_VOLUMES:-}"
+BACKUP_EXCLUDE_MOUNTS="${BACKUP_EXCLUDE_MOUNTS:-}"
 BACKUP_POST_HOOK="${BACKUP_POST_HOOK:-}"
 BACKUP_FAIL_HOOK="${BACKUP_FAIL_HOOK:-}"
 BACKUP_HEALTHCHECK_URL="${BACKUP_HEALTHCHECK_URL:-}"
@@ -323,6 +325,18 @@ is_excluded_volume() {
     return 1
 }
 
+# Check if a bind-mount path should be excluded
+is_excluded_mount() {
+    local mount="$1"
+    for excl in $BACKUP_EXCLUDE_MOUNTS; do
+        # Exact match or mount is under excluded path
+        if [[ "$mount" == "$excl" || "$mount" == "$excl"/* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Pre-backup hooks (database dumps)
 # ---------------------------------------------------------------------------
@@ -527,6 +541,12 @@ collect_stack_files() {
             abs_mount="$mount_src"
         else
             abs_mount="$(cd "$STACK_DIR" && realpath -m "$mount_src" 2>/dev/null || echo "$STACK_DIR/$mount_src")"
+        fi
+
+        # Skip excluded mounts
+        if is_excluded_mount "$abs_mount"; then
+            info "Skipping excluded mount: $abs_mount"
+            continue
         fi
 
         # Check if inside or outside stack dir
@@ -745,8 +765,10 @@ cmd_discover() {
     while IFS= read -r mount; do
         if [[ -z "$mount" ]]; then continue; fi
         local exists="exists"
+        local excl=""
         if [[ ! -e "$mount" ]]; then exists="NOT FOUND"; fi
-        echo "  $mount  [$exists]"
+        if is_excluded_mount "$mount"; then excl=" [EXCLUDED]"; fi
+        echo "  $mount  [$exists]$excl"
     done < <(discover_bind_mounts "$config")
 
     echo ""
