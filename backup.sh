@@ -27,6 +27,7 @@
 #   BACKUP_KEEP_MONTHLY   Retention: monthly snapshots to keep (default: 3)
 #   BACKUP_EXCLUDE_VOLUMES  Space-separated volume names to skip
 #   BACKUP_EXCLUDE_MOUNTS  Space-separated bind-mount paths to skip (e.g. "/ /proc /sys")
+#   BACKUP_PRE_HOOK       Command to run before backup starts (optional)
 #   BACKUP_POST_HOOK      Command to run after successful backup (optional)
 #   BACKUP_FAIL_HOOK      Command to run after failed backup (optional)
 #   BACKUP_HEALTHCHECK_URL  URL to ping after backup (Healthchecks.io, Uptime Kuma, etc.)
@@ -59,6 +60,7 @@ BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-4}"
 BACKUP_KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-3}"
 BACKUP_EXCLUDE_VOLUMES="${BACKUP_EXCLUDE_VOLUMES:-}"
 BACKUP_EXCLUDE_MOUNTS="${BACKUP_EXCLUDE_MOUNTS:-}"
+BACKUP_PRE_HOOK="${BACKUP_PRE_HOOK:-}"
 BACKUP_POST_HOOK="${BACKUP_POST_HOOK:-}"
 BACKUP_FAIL_HOOK="${BACKUP_FAIL_HOOK:-}"
 BACKUP_HEALTHCHECK_URL="${BACKUP_HEALTHCHECK_URL:-}"
@@ -317,6 +319,7 @@ resolve_volume_path() {
 # Check if a volume should be excluded
 is_excluded_volume() {
     local vol="$1"
+    local excl
     for excl in $BACKUP_EXCLUDE_VOLUMES; do
         if [[ "$vol" == "$excl" ]]; then
             return 0
@@ -328,6 +331,7 @@ is_excluded_volume() {
 # Check if a bind-mount path should be excluded
 is_excluded_mount() {
     local mount="$1"
+    local excl
     for excl in $BACKUP_EXCLUDE_MOUNTS; do
         # Exact match or mount is under excluded path
         if [[ "$mount" == "$excl" || "$mount" == "$excl"/* ]]; then
@@ -817,6 +821,9 @@ cmd_backup() {
         fi
     fi
 
+    # Pre-hook (e.g. set maintenance mode)
+    run_hook "$BACKUP_PRE_HOOK" "pre-hook"
+
     # Phase 1: Pre-hooks (DB dumps while stack is running)
     info "--- Phase 1: Database dumps ---"
     run_pre_hooks "$config" "$STAGING_DIR/dumps"
@@ -942,6 +949,8 @@ Environment:
   BACKUP_KEEP_WEEKLY     Weekly snapshots to keep (default: 4)
   BACKUP_KEEP_MONTHLY    Monthly snapshots to keep (default: 3)
   BACKUP_EXCLUDE_VOLUMES Space-separated volume names to skip
+  BACKUP_EXCLUDE_MOUNTS  Space-separated bind-mount paths to skip
+  BACKUP_PRE_HOOK        Command before backup starts (optional)
   BACKUP_POST_HOOK       Command after successful backup (optional)
   BACKUP_FAIL_HOOK       Command after failed backup (optional)
   BACKUP_HEALTHCHECK_URL Ping URL on success, URL/fail on error
