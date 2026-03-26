@@ -317,6 +317,7 @@ resolve_volume_path() {
 # Check if a volume should be excluded
 is_excluded_volume() {
     local vol="$1"
+    local excl
     for excl in $BACKUP_EXCLUDE_VOLUMES; do
         if [[ "$vol" == "$excl" ]]; then
             return 0
@@ -328,6 +329,7 @@ is_excluded_volume() {
 # Check if a bind-mount path should be excluded
 is_excluded_mount() {
     local mount="$1"
+    local excl
     for excl in $BACKUP_EXCLUDE_MOUNTS; do
         # Exact match or mount is under excluded path
         if [[ "$mount" == "$excl" || "$mount" == "$excl"/* ]]; then
