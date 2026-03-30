@@ -1,6 +1,6 @@
-# docker-stack-backup
+# Kedge
 
-Generic encrypted backup & bare-metal restore for any Docker Compose stack.
+Generic encrypted backup & bare-metal restore for any Docker Compose stack. Your rescue anchor for Docker.
 
 Auto-discovers volumes, bind mounts, and databases. No configuration files needed — just point it at a stack directory and a restic repository.
 
@@ -101,9 +101,9 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 ## Cron Setup
 
 ```bash
-# /etc/cron.d/docker-stack-backup
-0 3 * * * root STACK_DIR=/opt/myapp RESTIC_REPOSITORY=/backup/myapp RESTIC_PASSWORD_FILE=/etc/backup-pw /opt/docker-stack-backup/backup.sh backup >> /var/log/dsb-backup.log 2>&1
-0 4 * * 0 root STACK_DIR=/opt/myapp RESTIC_REPOSITORY=/backup/myapp RESTIC_PASSWORD_FILE=/etc/backup-pw /opt/docker-stack-backup/backup.sh prune >> /var/log/dsb-backup.log 2>&1
+# /etc/cron.d/kedge
+0 3 * * * root STACK_DIR=/opt/myapp RESTIC_REPOSITORY=/backup/myapp RESTIC_PASSWORD_FILE=/etc/backup-pw /opt/kedge/backup.sh backup >> /var/log/kedge-backup.log 2>&1
+0 4 * * 0 root STACK_DIR=/opt/myapp RESTIC_REPOSITORY=/backup/myapp RESTIC_PASSWORD_FILE=/etc/backup-pw /opt/kedge/backup.sh prune >> /var/log/kedge-backup.log 2>&1
 ```
 
 ## Environment Variables
