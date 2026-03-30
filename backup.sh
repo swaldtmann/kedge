@@ -170,6 +170,11 @@ check_prereqs() {
     done
     $found || die "No docker-compose file found in $STACK_DIR"
 
+    # Pass .env explicitly — auto-detection is unreliable via cron (#5, #6)
+    if [[ -f "$STACK_DIR/.env" ]]; then
+        COMPOSE_CMD="$COMPOSE_CMD --env-file $STACK_DIR/.env"
+    fi
+
     # Restic config
     if [[ -z "$RESTIC_REPOSITORY" ]]; then
         die "RESTIC_REPOSITORY not set"
