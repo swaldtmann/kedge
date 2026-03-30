@@ -280,6 +280,10 @@ Install on Ubuntu/Debian:
 apt-get install -y docker.io docker-compose-v2 restic jq rsync
 ```
 
+## Built with
+
+This project is developed with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Anthropic Claude Opus 4.6).
+
 ## License
 
-MIT
+Apache 2.0
