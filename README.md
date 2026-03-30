@@ -152,7 +152,7 @@ BACKUP_POST_HOOK='mosquitto_pub -h localhost -t health/backup -m "{\"status\":\"
 BACKUP_POST_HOOK='curl -sf -X POST -H "Content-Type: application/json" -d "{\"text\":\"Backup OK: $BACKUP_STACK ($BACKUP_SIZE, ${BACKUP_DURATION}s)\"}" https://hooks.slack.com/services/xxx'
 
 # Log to file
-BACKUP_POST_HOOK='echo "$BACKUP_TIMESTAMP ok $BACKUP_STACK $BACKUP_SNAPSHOT $BACKUP_SIZE ${BACKUP_DURATION}s" >> /var/log/dsb-results.log'
+BACKUP_POST_HOOK='echo "$BACKUP_TIMESTAMP ok $BACKUP_STACK $BACKUP_SNAPSHOT $BACKUP_SIZE ${BACKUP_DURATION}s" >> /var/log/kedge-results.log'
 ```
 
 Or skip hooks entirely and just set a URL — works with Healthchecks.io, Uptime Kuma, Cronitor:
@@ -248,10 +248,10 @@ Monthly automated proof that your backups actually work. Spins up a fresh Hetzne
 
 ```bash
 # Verify latest backup
-. /etc/dsb-backup.env && ./verify.sh
+. /etc/kedge-backup.env && ./verify.sh
 
 # Cron: monthly on the 1st at 05:00 UTC
-0 5 1 * * root . /etc/dsb-backup.env && /usr/local/bin/dsb-verify latest >> /var/log/dsb-verify.log 2>&1
+0 5 1 * * root . /etc/kedge-backup.env && /usr/local/bin/kedge-verify latest >> /var/log/kedge-verify.log 2>&1
 ```
 
 Health checks:

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Renamed project from docker-stack-backup to Kedge
+
+### Fixed
+- Pass `--env-file` explicitly to all compose calls — fixes env var warnings via cron (#5, #6)
+
 ## [0.2.0] - 2026-03-21
 
 ### Added
