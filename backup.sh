@@ -227,9 +227,13 @@ discover_services() {
 }
 
 # Map image name to DB type for pre-hooks
+# Only match if the DB name is in the image name (before the tag), not in a tag suffix.
+# e.g. "mariadb:11.5" → mysql, but "xwiki:16.9.0-mariadb-tomcat" → ""
 detect_db_type() {
     local image="$1"
-    case "$image" in
+    # Strip tag (everything after last colon) to get the image name only
+    local image_name="${image%%:*}"
+    case "$image_name" in
         *postgres*|*postgis*)   echo "postgres" ;;
         *mariadb*|*mysql*)      echo "mysql" ;;
         *valkey*|*redis*)       echo "valkey" ;;
@@ -397,7 +401,12 @@ run_pre_hooks() {
                 if [[ -n "$mysql_pass" ]]; then
                     mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                 fi
-                docker exec "${mysql_exec_args[@]}" "$container" mysqldump --all-databases -uroot 2>/dev/null \
+                # MariaDB 11+ dropped mysqldump symlink — try mariadb-dump first
+                local dump_cmd="mysqldump"
+                if docker exec "$container" which mariadb-dump &>/dev/null; then
+                    dump_cmd="mariadb-dump"
+                fi
+                docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases -uroot 2>/dev/null \
                     | gzip > "$dump_dir/${svc}_mysql.sql.gz"
                 ok "MySQL dump: ${svc}_mysql.sql.gz ($(du -h "$dump_dir/${svc}_mysql.sql.gz" | cut -f1))"
                 hooks_run=$((hooks_run + 1))
