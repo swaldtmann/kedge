@@ -18,7 +18,7 @@
 # Environment:
 #   HCLOUD_CONTEXT         hcloud CLI context to use (default: kigulls-test)
 #   HCLOUD_TOKEN           Alternative: API token directly (overrides context)
-#   TEST_SERVER_TYPE       Server type (default: cx22)
+#   TEST_SERVER_TYPE       Server type (default: cpx22)
 #   TEST_LOCATION          Datacenter (default: nbg1)
 # =============================================================================
 

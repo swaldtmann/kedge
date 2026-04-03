@@ -585,7 +585,7 @@ Health checks performed:
   - .env configuration file is present
 
 Cron example (monthly):
-  0 5 1 * * root . /etc/kedge.env && /usr/local/bin/kedge-verify latest >> /var/log/kedge-verify.log 2>&1
+  0 5 1 * * root . /etc/kedge-backup.env && /usr/local/bin/kedge-verify latest >> /var/log/kedge-verify.log 2>&1
 
 Exit codes:
   0  All health checks passed
