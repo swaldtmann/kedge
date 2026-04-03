@@ -31,6 +31,16 @@ export HCLOUD_TOKEN=<your-token>
 
 For smaller changes, verify with `discover` + `backup` + `restore` on a local stack.
 
+## Release Checklist
+
+Before tagging a new release:
+
+1. Update `CHANGELOG.md` — move Unreleased items to the new version
+2. Update `SECURITY.md` — Supported Versions table matches the new release
+3. Create tag: `git tag v<version>`
+4. Create Codeberg Release with CHANGELOG excerpt
+5. Verify: tag, release, CHANGELOG, SECURITY.md all consistent
+
 ## What We Don't Accept
 
 - Changes that violate privacy principles

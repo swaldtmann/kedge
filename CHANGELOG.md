@@ -54,3 +54,15 @@ v0.3.0 renames everything. Existing installations need these steps:
 
 ### Security
 - DB credentials via env vars, not CLI arguments
+
+## [0.1.0] - 2026-03-20
+
+### Added
+- Generic Docker Compose backup/restore with restic
+- Auto-discovery of volumes, bind mounts, databases
+- Encrypted + deduplicated backups (AES-256 via restic)
+- Basic restore to fresh VPS
+- `test.sh` for roundtrip testing on Hetzner Cloud
+
+### Fixed
+- Support hcloud CLI contexts in test.sh
