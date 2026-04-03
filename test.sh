@@ -39,7 +39,7 @@ SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
 KEEP_BOXES=false
 
 # Test prefix for easy cleanup
-TEST_PREFIX="dsb-test"
+TEST_PREFIX="kedge-test"
 BOX_A_NAME="${TEST_PREFIX}-a-$(date +%H%M)"
 BOX_B_NAME="${TEST_PREFIX}-b-$(date +%H%M)"
 BOX_A_IP=""
@@ -127,7 +127,7 @@ create_box() {
                 --image "$TEST_IMAGE" \
                 --location "$loc" \
                 --ssh-key "$SSH_KEY_NAME" \
-                --label "purpose=dsb-test" >/dev/null 2>&1; then
+                --label "purpose=kedge-test" >/dev/null 2>&1; then
                 created=true
                 ok "Server $name created ($stype, $loc)"
                 break 2
@@ -232,7 +232,7 @@ server {
 NGINX
 
 # Test data for nginx
-echo "<h1>DSB Test Page</h1><p>Backup test data: $(date)</p>" \
+echo "<h1>Kedge Test Page</h1><p>Backup test data: $(date)</p>" \
     > /opt/test-stack/nginx-html/index.html
 
 # Start stack
@@ -278,25 +278,25 @@ capture_checksums() {
 
     ssh_box "$ip" bash -s <<'CHECKSUMS'
 set -euo pipefail
-mkdir -p /tmp/dsb-verify
+mkdir -p /tmp/kedge-verify
 
 # Postgres row count + data
 docker exec teststack-postgres-1 psql -U testuser -d testdb -t -c \
-    "SELECT data FROM backup_test ORDER BY id" > /tmp/dsb-verify/pg-data.txt
+    "SELECT data FROM backup_test ORDER BY id" > /tmp/kedge-verify/pg-data.txt
 
 # Valkey keys
 docker exec teststack-valkey-1 valkey-cli -a testvalkey GET backup:test:verify \
-    > /tmp/dsb-verify/valkey-verify.txt 2>/dev/null
+    > /tmp/kedge-verify/valkey-verify.txt 2>/dev/null
 
 # Nginx page
-curl -s http://localhost:8080/ > /tmp/dsb-verify/nginx-page.txt
+curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt
 
 # .env content
-cat /opt/test-stack/.env > /tmp/dsb-verify/env-content.txt
+cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt
 
 echo "=== Verification data captured ==="
-cat /tmp/dsb-verify/pg-data.txt
-cat /tmp/dsb-verify/valkey-verify.txt
+cat /tmp/kedge-verify/pg-data.txt
+cat /tmp/kedge-verify/valkey-verify.txt
 CHECKSUMS
 }
 
@@ -309,8 +309,8 @@ run_backup() {
     info "Running backup on $ip..."
 
     # Upload backup.sh
-    scp $SSH_OPTS "$SCRIPT_DIR/backup.sh" "root@$ip:/usr/local/bin/dsb-backup"
-    ssh_box "$ip" "chmod +x /usr/local/bin/dsb-backup"
+    scp $SSH_OPTS "$SCRIPT_DIR/backup.sh" "root@$ip:/usr/local/bin/kedge-backup"
+    ssh_box "$ip" "chmod +x /usr/local/bin/kedge-backup"
 
     ssh_box "$ip" bash -s -- "$BACKUP_PASSWORD" <<'RUNBACKUP'
 set -euo pipefail
@@ -319,16 +319,16 @@ export RESTIC_REPOSITORY=/backup/test-repo
 export RESTIC_PASSWORD="$1"
 
 # Init repo
-dsb-backup init
+kedge-backup init
 
 # Discovery (dry-run log)
-dsb-backup discover
+kedge-backup discover
 
 # Full backup
-dsb-backup backup
+kedge-backup backup
 
 # List snapshots
-dsb-backup list
+kedge-backup list
 
 echo "=== Backup complete ==="
 ls -lah /backup/test-repo/
@@ -370,8 +370,8 @@ run_restore() {
     info "Running restore on $ip..."
 
     # Upload restore.sh
-    scp $SSH_OPTS "$SCRIPT_DIR/restore.sh" "root@$ip:/usr/local/bin/dsb-restore"
-    ssh_box "$ip" "chmod +x /usr/local/bin/dsb-restore"
+    scp $SSH_OPTS "$SCRIPT_DIR/restore.sh" "root@$ip:/usr/local/bin/kedge-restore"
+    ssh_box "$ip" "chmod +x /usr/local/bin/kedge-restore"
 
     ssh_box "$ip" bash -s -- "$BACKUP_PASSWORD" <<'RUNRESTORE'
 set -euo pipefail
@@ -380,10 +380,10 @@ export RESTIC_PASSWORD="$1"
 export RESTORE_TARGET=/opt/test-stack
 
 # List snapshots
-dsb-restore --list
+kedge-restore --list
 
 # Restore latest
-dsb-restore latest
+kedge-restore latest
 
 echo "=== Restore complete ==="
 docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
@@ -406,30 +406,30 @@ verify_restore() {
     # Capture verification data on box B
     ssh_box "$dst_ip" bash -s <<'VERIFY_CAPTURE'
 set -euo pipefail
-mkdir -p /tmp/dsb-verify
+mkdir -p /tmp/kedge-verify
 
 # Wait for services to be fully ready
 sleep 15
 
 # Postgres
 docker exec teststack-postgres-1 psql -U testuser -d testdb -t -c \
-    "SELECT data FROM backup_test ORDER BY id" > /tmp/dsb-verify/pg-data.txt 2>/dev/null || echo "POSTGRES_FAIL" > /tmp/dsb-verify/pg-data.txt
+    "SELECT data FROM backup_test ORDER BY id" > /tmp/kedge-verify/pg-data.txt 2>/dev/null || echo "POSTGRES_FAIL" > /tmp/kedge-verify/pg-data.txt
 
 # Valkey
 docker exec teststack-valkey-1 valkey-cli -a testvalkey GET backup:test:verify \
-    > /tmp/dsb-verify/valkey-verify.txt 2>/dev/null || echo "VALKEY_FAIL" > /tmp/dsb-verify/valkey-verify.txt
+    > /tmp/kedge-verify/valkey-verify.txt 2>/dev/null || echo "VALKEY_FAIL" > /tmp/kedge-verify/valkey-verify.txt
 
 # Nginx page
-curl -s http://localhost:8080/ > /tmp/dsb-verify/nginx-page.txt 2>/dev/null || echo "NGINX_FAIL" > /tmp/dsb-verify/nginx-page.txt
+curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt 2>/dev/null || echo "NGINX_FAIL" > /tmp/kedge-verify/nginx-page.txt
 
 # .env
-cat /opt/test-stack/.env > /tmp/dsb-verify/env-content.txt 2>/dev/null || echo "ENV_FAIL" > /tmp/dsb-verify/env-content.txt
+cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt 2>/dev/null || echo "ENV_FAIL" > /tmp/kedge-verify/env-content.txt
 VERIFY_CAPTURE
 
     # Compare: Postgres data
     local src_pg dst_pg
-    src_pg="$(ssh_box "$src_ip" cat /tmp/dsb-verify/pg-data.txt)"
-    dst_pg="$(ssh_box "$dst_ip" cat /tmp/dsb-verify/pg-data.txt)"
+    src_pg="$(ssh_box "$src_ip" cat /tmp/kedge-verify/pg-data.txt)"
+    dst_pg="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/pg-data.txt)"
     if [[ "$src_pg" == "$dst_pg" ]]; then
         ok "PASS: PostgreSQL data matches"
     else
@@ -441,8 +441,8 @@ VERIFY_CAPTURE
 
     # Compare: Valkey data
     local src_vk dst_vk
-    src_vk="$(ssh_box "$src_ip" cat /tmp/dsb-verify/valkey-verify.txt)"
-    dst_vk="$(ssh_box "$dst_ip" cat /tmp/dsb-verify/valkey-verify.txt)"
+    src_vk="$(ssh_box "$src_ip" cat /tmp/kedge-verify/valkey-verify.txt)"
+    dst_vk="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/valkey-verify.txt)"
     if [[ "$src_vk" == "$dst_vk" ]]; then
         ok "PASS: Valkey data matches"
     else
@@ -454,8 +454,8 @@ VERIFY_CAPTURE
 
     # Compare: .env
     local src_env dst_env
-    src_env="$(ssh_box "$src_ip" cat /tmp/dsb-verify/env-content.txt)"
-    dst_env="$(ssh_box "$dst_ip" cat /tmp/dsb-verify/env-content.txt)"
+    src_env="$(ssh_box "$src_ip" cat /tmp/kedge-verify/env-content.txt)"
+    dst_env="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/env-content.txt)"
     if [[ "$src_env" == "$dst_env" ]]; then
         ok "PASS: .env matches"
     else
@@ -465,8 +465,8 @@ VERIFY_CAPTURE
 
     # Check: Nginx responds
     local dst_nginx
-    dst_nginx="$(ssh_box "$dst_ip" cat /tmp/dsb-verify/nginx-page.txt)"
-    if echo "$dst_nginx" | grep -q "DSB Test Page"; then
+    dst_nginx="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/nginx-page.txt)"
+    if echo "$dst_nginx" | grep -q "Kedge Test Page"; then
         ok "PASS: Nginx serves restored page"
     else
         err "FAIL: Nginx page not restored"
@@ -531,7 +531,7 @@ cmd_test() {
     total_start="$(date +%s)"
 
     info "========================================="
-    info "  docker-stack-backup — Roundtrip Test"
+    info "  kedge — Roundtrip Test"
     info "========================================="
     echo ""
 
@@ -612,7 +612,7 @@ XFER
 
 usage() {
     cat <<EOF
-docker-stack-backup test — Full roundtrip backup/restore test on Hetzner Cloud
+kedge test — Full roundtrip backup/restore test on Hetzner Cloud
 
 Usage: $(basename "$0") [options]
 

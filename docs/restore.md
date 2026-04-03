@@ -29,8 +29,8 @@ export RESTORE_TARGET=/opt/myapp
 From a local checkout, another server, or download:
 
 ```bash
-scp local-machine:docker-stack-backup/restore.sh /usr/local/bin/dsb-restore
-chmod +x /usr/local/bin/dsb-restore
+scp local-machine:kedge/restore.sh /usr/local/bin/kedge-restore
+chmod +x /usr/local/bin/kedge-restore
 ```
 
 ### 2. Set credentials
@@ -49,15 +49,15 @@ ssh uXXXXXX@uXXXXXX.your-storagebox.de ls /myapp
 ### 3. List available snapshots
 
 ```bash
-dsb-restore --list
+kedge-restore --list
 ```
 
 Output:
 ```
 ID        Time                 Host        Tags
 ------------------------------------------------------
-ad7f04f3  2026-03-20 03:00:06  myserver    docker-stack-backup
-bf9e2c11  2026-03-19 03:00:04  myserver    docker-stack-backup
+ad7f04f3  2026-03-20 03:00:06  myserver    kedge
+bf9e2c11  2026-03-19 03:00:04  myserver    kedge
 ...
 ```
 
@@ -65,10 +65,10 @@ bf9e2c11  2026-03-19 03:00:04  myserver    docker-stack-backup
 
 ```bash
 # Latest snapshot
-dsb-restore latest
+kedge-restore latest
 
 # Specific snapshot by ID
-dsb-restore ad7f04f3
+kedge-restore ad7f04f3
 ```
 
 ### 5. Verify
@@ -99,7 +99,7 @@ curl -s http://localhost:8080/
 Restore files without starting the stack (for inspection):
 
 ```bash
-dsb-restore --verify latest
+kedge-restore --verify latest
 ```
 
 This restores everything to `RESTORE_TARGET` but does not run `docker compose up`. You can inspect the files and start manually:
@@ -117,7 +117,7 @@ If the compose project name differs on the new server, volumes may need manual r
 
 ## Troubleshooting
 
-**"No meta.json found"** — The snapshot was not created by docker-stack-backup. Check with `restic ls <snapshot-id>`.
+**"No meta.json found"** — The snapshot was not created by kedge. Check with `restic ls <snapshot-id>`.
 
 **DB import errors** — PostgreSQL often reports harmless errors about existing roles during `pg_dumpall` restore. Check if the data is actually there:
 ```bash

@@ -822,7 +822,7 @@ cmd_backup() {
     local start_time
     start_time="$(date +%s)"
 
-    STAGING_DIR="$(mktemp -d /tmp/dsb-staging.XXXXXX)"
+    STAGING_DIR="$(mktemp -d /tmp/kedge-staging.XXXXXX)"
     trap cleanup EXIT
 
     local config
@@ -868,7 +868,7 @@ cmd_backup() {
     done
 
     restic backup "${backup_paths[@]}" \
-        --tag "docker-stack-backup" \
+        --tag "kedge" \
         --tag "stack:$(basename "$STACK_DIR")" \
         --host "$hostname_str"
 
@@ -909,7 +909,7 @@ cmd_backup() {
 
 cmd_list() {
     check_prereqs
-    restic snapshots --tag "docker-stack-backup"
+    restic snapshots --tag "kedge"
 }
 
 cmd_check() {
@@ -926,7 +926,7 @@ cmd_prune() {
         --keep-daily "$BACKUP_KEEP_DAILY" \
         --keep-weekly "$BACKUP_KEEP_WEEKLY" \
         --keep-monthly "$BACKUP_KEEP_MONTHLY" \
-        --tag "docker-stack-backup" \
+        --tag "kedge" \
         --prune
     ok "Prune complete"
 }
@@ -937,7 +937,7 @@ cmd_prune() {
 
 usage() {
     cat <<EOF
-docker-stack-backup v${VERSION} — Generic encrypted Docker Compose backup
+kedge v${VERSION} — Generic encrypted Docker Compose backup
 
 Usage: $(basename "$0") <command> [options]
 

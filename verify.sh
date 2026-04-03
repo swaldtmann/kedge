@@ -52,7 +52,7 @@ VERIFY_FAIL_HOOK="${VERIFY_FAIL_HOOK:-}"
 KEEP_BOX=false
 
 SNAPSHOT_ID="${1:-latest}"
-VERIFY_PREFIX="dsb-verify"
+VERIFY_PREFIX="kedge-verify"
 BOX_NAME="${VERIFY_PREFIX}-$(date +%H%M)"
 BOX_IP=""
 
@@ -186,7 +186,7 @@ create_box() {
                 --image "$VERIFY_IMAGE" \
                 --location "$loc" \
                 --ssh-key "$SSH_KEY_NAME" \
-                --label "purpose=dsb-verify" >/dev/null 2>&1; then
+                --label "purpose=kedge-verify" >/dev/null 2>&1; then
                 created=true
                 ok "Server $name created ($stype, $loc)"
                 break 2
@@ -461,8 +461,8 @@ cmd_verify() {
 
     # Step 2: Upload restore script + restic credentials
     info "--- Step 2: Upload restore script ---"
-    scp $SSH_OPTS "$SCRIPT_DIR/restore.sh" "root@$BOX_IP:/usr/local/bin/dsb-restore"
-    ssh_box "$BOX_IP" "chmod +x /usr/local/bin/dsb-restore"
+    scp $SSH_OPTS "$SCRIPT_DIR/restore.sh" "root@$BOX_IP:/usr/local/bin/kedge-restore"
+    ssh_box "$BOX_IP" "chmod +x /usr/local/bin/kedge-restore"
 
     # For local restic repos: won't work remotely. For sftp/s3: works directly.
     # For local repos in tests: copy the repo to the box first.
@@ -489,7 +489,7 @@ export RESTIC_PASSWORD="$2"
 export RESTORE_TARGET="$3"
 SNAP="$4"
 
-dsb-restore "$SNAP"
+kedge-restore "$SNAP"
 RESTORE
 
     # Step 4: Wait for services to settle
@@ -550,7 +550,7 @@ cmd_burn() {
 
 usage() {
     cat <<EOF
-docker-stack-backup verify — Automated restore verification
+kedge verify — Automated restore verification
 
 Restores the latest (or specified) backup snapshot on a fresh Hetzner Cloud
 VPS and runs health checks. Proves the backup is bootable.
@@ -585,7 +585,7 @@ Health checks performed:
   - .env configuration file is present
 
 Cron example (monthly):
-  0 5 1 * * root . /etc/dsb-backup.env && /usr/local/bin/dsb-verify latest >> /var/log/dsb-verify.log 2>&1
+  0 5 1 * * root . /etc/kedge.env && /usr/local/bin/kedge-verify latest >> /var/log/kedge-verify.log 2>&1
 
 Exit codes:
   0  All health checks passed

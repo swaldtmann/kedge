@@ -1,6 +1,6 @@
 # Auto-Discovery
 
-docker-stack-backup discovers everything it needs from `docker-compose.yml` at runtime. No configuration files, no volume lists, no manual hooks. When you add or remove containers, the next backup automatically adjusts.
+kedge discovers everything it needs from `docker-compose.yml` at runtime. No configuration files, no volume lists, no manual hooks. When you add or remove containers, the next backup automatically adjusts.
 
 ## How It Works
 
@@ -68,7 +68,7 @@ Each backup includes a `meta.json` with:
 
 ## Preview with `discover`
 
-Run `dsb-backup discover` to see what would be backed up without actually running a backup:
+Run `kedge-backup discover` to see what would be backed up without actually running a backup:
 
 ```
 === Stack: /opt/myapp ===
@@ -99,7 +99,7 @@ To skip specific volumes (e.g., large cache volumes that don't need backup):
 
 ```bash
 export BACKUP_EXCLUDE_VOLUMES="prometheus_data node_modules_cache"
-dsb-backup backup
+kedge-backup backup
 ```
 
 ## Adding New Services

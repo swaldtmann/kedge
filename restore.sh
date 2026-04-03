@@ -95,7 +95,7 @@ cleanup() {
 
 cmd_list() {
     check_prereqs
-    restic snapshots --tag "docker-stack-backup"
+    restic snapshots --tag "kedge"
 }
 
 cmd_restore() {
@@ -116,18 +116,18 @@ cmd_restore() {
     local start_time
     start_time="$(date +%s)"
 
-    STAGING_DIR="$(mktemp -d /tmp/dsb-restore.XXXXXX)"
+    STAGING_DIR="$(mktemp -d /tmp/kedge-restore.XXXXXX)"
     trap cleanup EXIT
 
     # Phase 1: Restic restore to staging
     info "--- Phase 1: Restic restore ---"
-    restic restore "$SNAPSHOT_ID" --target "$STAGING_DIR" --tag "docker-stack-backup"
+    restic restore "$SNAPSHOT_ID" --target "$STAGING_DIR" --tag "kedge"
 
     # Find the actual backup root (restic preserves full path)
     local backup_root
-    backup_root="$(find "$STAGING_DIR" -name "meta.json" -path "*/dsb-staging*" -print -quit 2>/dev/null)"
+    backup_root="$(find "$STAGING_DIR" -name "meta.json" -path "*/kedge-staging*" -print -quit 2>/dev/null)"
     if [[ -z "$backup_root" ]]; then
-        die "No meta.json found in snapshot — is this a docker-stack-backup snapshot?"
+        die "No meta.json found in snapshot — is this a kedge snapshot?"
     fi
     backup_root="$(dirname "$backup_root")"
     ok "Backup data found at: $backup_root"
@@ -393,7 +393,7 @@ cmd_restore() {
 
 usage() {
     cat <<EOF
-docker-stack-backup restore v${VERSION} — Bare-metal Docker Compose restore
+kedge restore v${VERSION} — Bare-metal Docker Compose restore
 
 Usage: $(basename "$0") [options] [snapshot-id]
 
