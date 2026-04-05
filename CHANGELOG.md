@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Scope loop variable in `is_excluded_mount` / `is_excluded_volume` (#8)
 - MariaDB 11+ dump compatibility + image-tag false positive
 - Correct config filename in verify.sh cron example (`kedge-backup.env`)
-- Correct server type in test.sh comments (`cpx22`)
+- Correct server type in test.sh comments (`cpx23`)
 
 ## Migration from docker-stack-backup
 

@@ -18,7 +18,7 @@
 # Environment:
 #   HCLOUD_CONTEXT         hcloud CLI context to use (default: kigulls-test)
 #   HCLOUD_TOKEN           Alternative: API token directly (overrides context)
-#   TEST_SERVER_TYPE       Server type (default: cpx22)
+#   TEST_SERVER_TYPE       Server type (default: cpx23)
 #   TEST_LOCATION          Datacenter (default: nbg1)
 # =============================================================================
 
@@ -32,7 +32,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
 HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cpx22}"
+TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cpx23}"
 TEST_LOCATION="${TEST_LOCATION:-nbg1}"
 TEST_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
@@ -114,7 +114,7 @@ create_box() {
     local name="$1"
 
     # Fallback: try multiple type/location combinations (DE only)
-    local types=("$TEST_SERVER_TYPE" cpx22 cpx21 cax11)
+    local types=("$TEST_SERVER_TYPE" cpx23 cpx21 cax11)
     local locations=("$TEST_LOCATION" nbg1 fsn1)
     local created=false
 

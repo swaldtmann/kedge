@@ -22,7 +22,7 @@
 # Environment (optional):
 #   HCLOUD_CONTEXT        hcloud CLI context (default: kigulls-test)
 #   HCLOUD_TOKEN          Alternative: API token directly
-#   VERIFY_SERVER_TYPE    Server type (default: cpx22)
+#   VERIFY_SERVER_TYPE    Server type (default: cpx23)
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
 #   SSH_KEY_NAME          SSH key in hcloud (default: stephan@waldtmann.de)
 #   RESTORE_TARGET        Where to restore on the box (default: /opt/stack)
@@ -42,7 +42,7 @@ RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
 RESTIC_PASSWORD="${RESTIC_PASSWORD:-}"
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
 HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cpx22}"
+VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cpx23}"
 VERIFY_LOCATION="${VERIFY_LOCATION:-nbg1}"
 VERIFY_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
@@ -173,7 +173,7 @@ wait_for_ssh() {
 
 create_box() {
     local name="$1"
-    local types=("$VERIFY_SERVER_TYPE" cpx22 cpx21 cax11)
+    local types=("$VERIFY_SERVER_TYPE" cpx23 cpx21 cax11)
     local locations=("$VERIFY_LOCATION" nbg1 fsn1)
     local created=false
 
@@ -572,7 +572,7 @@ Environment (required):
 
 Environment (optional):
   HCLOUD_CONTEXT         hcloud CLI context (default: kigulls-test)
-  VERIFY_SERVER_TYPE     Server type (default: cpx22)
+  VERIFY_SERVER_TYPE     Server type (default: cpx23)
   VERIFY_LOCATION        Datacenter (default: nbg1)
   RESTORE_TARGET         Where to restore (default: /opt/stack)
   VERIFY_POST_HOOK       Command after successful verify
