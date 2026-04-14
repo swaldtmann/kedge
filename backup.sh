@@ -822,7 +822,14 @@ cmd_backup() {
     local start_time
     start_time="$(date +%s)"
 
-    STAGING_DIR="$(mktemp -d /tmp/kedge-staging.XXXXXX)"
+    # Stable staging path so restic finds the parent snapshot for incremental scans (#18).
+    # Random mktemp paths cause restic to re-walk every file each run because parent
+    # detection is keyed on host+paths.
+    local staging_base="${KEDGE_STAGING_BASE:-/var/lib/kedge/staging}"
+    STAGING_DIR="$staging_base/$(basename "$STACK_DIR")"
+    mkdir -p "$staging_base"
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
     trap cleanup EXIT
 
     local config
