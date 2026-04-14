@@ -123,9 +123,11 @@ cmd_restore() {
     info "--- Phase 1: Restic restore ---"
     restic restore "$SNAPSHOT_ID" --target "$STAGING_DIR" --tag "kedge"
 
-    # Find the actual backup root (restic preserves full path)
+    # Find the actual backup root (restic preserves full path).
+    # Match both new stable paths (*/staging/<stack>/) and legacy mktemp paths
+    # (*/kedge-staging.XXXXXX) for backward compatibility with old snapshots (#18).
     local backup_root
-    backup_root="$(find "$STAGING_DIR" -name "meta.json" -path "*/kedge-staging*" -print -quit 2>/dev/null)"
+    backup_root="$(find "$STAGING_DIR" -name "meta.json" \( -path "*/staging/*" -o -path "*/kedge-staging*" \) -print -quit 2>/dev/null)"
     if [[ -z "$backup_root" ]]; then
         die "No meta.json found in snapshot — is this a kedge snapshot?"
     fi
