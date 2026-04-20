@@ -419,12 +419,15 @@ run_pre_hooks() {
                 vk_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
                     | grep -E '^(VALKEY_PASSWORD|REDIS_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
                 if [[ -z "$vk_pass" ]]; then
-                    # Try extracting --requirepass from command args
+                    # AFKI-W-047: mounted password file (preferred pattern — not in .Config.Cmd)
+                    vk_pass="$(docker exec "$container" cat /run/secrets/valkey_password 2>/dev/null || true)"
+                fi
+                if [[ -z "$vk_pass" ]]; then
+                    # Legacy fallback: --requirepass in command args (pre-W-047)
                     vk_pass="$(docker inspect --format '{{json .Config.Cmd}}' "$container" \
                         | jq -r '.[]?' 2>/dev/null | grep -A1 '^--requirepass$' | tail -1 || true)"
                 fi
                 if [[ -z "$vk_pass" ]]; then
-                    # Try inline --requirepass=VALUE
                     vk_pass="$(docker inspect --format '{{json .Config.Cmd}}' "$container" \
                         | jq -r '.[]?' 2>/dev/null | grep '^--requirepass=' | cut -d= -f2 || true)"
                 fi
