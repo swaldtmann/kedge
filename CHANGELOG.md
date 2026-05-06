@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-06
+
 ### Fixed
 - Restic parent-snapshot detection: stable staging path `/var/lib/kedge/staging/<stack>` instead of random `mktemp`. Restic now finds the previous snapshot and walks only the diff, instead of re-scanning every file each run (#18). Configurable via `KEDGE_STAGING_BASE`. Restore matches both new and legacy paths — old snapshots remain restorable.
+- `test.sh` server type: cpx22 → cpx23 (Hetzner retired cpx22).
+
+### Docs
+- Public roadmap added (`ROADMAP.md`) — Reforge from Shell to Python, planned but unscheduled.
+- Release checklist in `CONTRIBUTING.md`.
+- `SECURITY.md` supported versions aligned with v0.3.0+.
 
 ## [0.3.0] - 2026-04-03
 
