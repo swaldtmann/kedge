@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Restic parent-snapshot detection: stable staging path `/var/lib/kedge/staging/<stack>` instead of random `mktemp`. Restic now finds the previous snapshot and walks only the diff, instead of re-scanning every file each run (#18). Configurable via `KEDGE_STAGING_BASE`. Restore matches both new and legacy paths — old snapshots remain restorable.
 - `test.sh` server type: cpx22 → cpx23 (Hetzner retired cpx22).
+- Valkey password extraction: prefer reading the mounted secret file at `/run/secrets/valkey_password` over the legacy `--requirepass` argument extraction. The newer Valkey deployment pattern (kigulls-ops AFKI-W-047) drops the inline argument; legacy fallback retained.
 
 ### Docs
 - Public roadmap added (`ROADMAP.md`) — Reforge from Shell to Python, planned but unscheduled.
