@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-08
+
+### Changed
+- **Split tool version from backup format version.** The single `VERSION`
+  constant in `backup.sh` and `restore.sh` (previously hardcoded
+  `"1.0.0"`) was overloaded: it drove both the `--help` banner and the
+  `meta.json` schema stamp written into every snapshot. Tool bugfixes
+  ended up bumping the on-disk format version even when the format
+  itself was unchanged.
+- Now two constants:
+  - `KEDGE_VERSION` — derived at runtime via `git describe --tags
+    --always --dirty`, falls back to `dev` for non-git checkouts. Drives
+    only the help banner.
+  - `BACKUP_FORMAT_VERSION` — hardcoded `"1.0.0"`, bumped only when the
+    `meta.json` schema or snapshot layout changes in a way an older
+    `restore.sh` could not handle.
+- `meta.json` now writes `format_version` and `kedge_version` as
+  separate fields. The previous single `version` field is no longer
+  emitted. **Restore-side compatibility:** existing `restore.sh` does
+  not read either field, so old snapshots (with `version`) and new
+  snapshots (with `format_version` + `kedge_version`) restore the same
+  way. A future `restore.sh` may guard on `format_version`.
+
+### Fixed
+- `--help` banner now reflects the actual checked-out tag instead of a
+  hardcoded `"1.0.0"` that drifted from reality.
+
 ## [0.3.1] - 2026-05-06
 
 ### Fixed

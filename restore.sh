@@ -19,8 +19,14 @@
 
 set -euo pipefail
 
-readonly VERSION="1.0.0"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Tool version — derived from git tag at runtime (see backup.sh for rationale).
+readonly KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+
+# Backup format version this restore.sh can handle. Bump in lockstep with
+# backup.sh BACKUP_FORMAT_VERSION when the meta.json schema changes.
+readonly BACKUP_FORMAT_VERSION="1.0.0"
 
 # ---------------------------------------------------------------------------
 # Config
@@ -395,7 +401,7 @@ cmd_restore() {
 
 usage() {
     cat <<EOF
-kedge restore v${VERSION} — Bare-metal Docker Compose restore
+kedge restore ${KEDGE_VERSION} — Bare-metal Docker Compose restore
 
 Usage: $(basename "$0") [options] [snapshot-id]
 
