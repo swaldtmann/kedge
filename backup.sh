@@ -44,8 +44,17 @@
 
 set -euo pipefail
 
-readonly VERSION="1.0.0"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Tool version — derived from git tag at runtime. Drives only the help banner.
+# Falls back to "dev" for non-git checkouts (e.g. extracted tarball).
+readonly KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+
+# Backup format version — schema of meta.json and snapshot layout.
+# Bump only when the on-disk format changes in a way that an older restore.sh
+# could not handle (new mandatory fields, renamed keys, etc.). Tool fixes that
+# don't touch the meta.json schema must NOT bump this.
+readonly BACKUP_FORMAT_VERSION="1.0.0"
 
 # ---------------------------------------------------------------------------
 # Config (overridable via env)
@@ -650,7 +659,8 @@ write_metadata() {
 
     cat > "$target/meta.json" <<METAEOF
 {
-    "version": "$VERSION",
+    "format_version": "$BACKUP_FORMAT_VERSION",
+    "kedge_version": "$KEDGE_VERSION",
     "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "hostname": "$hostname_str",
     "stack_dir": "$STACK_DIR",
@@ -947,7 +957,7 @@ cmd_prune() {
 
 usage() {
     cat <<EOF
-kedge v${VERSION} — Generic encrypted Docker Compose backup
+kedge ${KEDGE_VERSION} — Generic encrypted Docker Compose backup
 
 Usage: $(basename "$0") <command> [options]
 
