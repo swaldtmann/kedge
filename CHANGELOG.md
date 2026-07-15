@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-15
+
+### Fixed
+- **shellcheck cleanup in `backup.sh`/`restore.sh`** — `SCRIPT_DIR`/
+  `KEDGE_VERSION` split into separate declare+assign (SC2155, masked
+  `readlink`/`git describe` failures behind `readonly`'s own exit code).
+  Unused loop counters in the Postgres/MySQL restore-wait retries renamed
+  `_` (SC2034). `BACKUP_FORMAT_VERSION` in `restore.sh` is intentionally
+  unused today (reserved for a future format guard, see v0.3.2) — annotated
+  with `shellcheck disable=SC2034` instead of removed. Left the SC2001
+  style suggestion in the dump-name regex alone: the alternation
+  (`postgres|mysql|mongo`) has no clean bash-builtin equivalent and this
+  touches live restore parsing, not worth the risk for a style nit.
+
 ## [0.3.3] - 2026-07-15
 
 ### Fixed

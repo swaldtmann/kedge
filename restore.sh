@@ -19,13 +19,17 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+readonly SCRIPT_DIR
 
 # Tool version — derived from git tag at runtime (see backup.sh for rationale).
-readonly KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+readonly KEDGE_VERSION
 
 # Backup format version this restore.sh can handle. Bump in lockstep with
-# backup.sh BACKUP_FORMAT_VERSION when the meta.json schema changes.
+# backup.sh BACKUP_FORMAT_VERSION when the meta.json schema changes. Not read
+# yet (see v0.3.2 changelog) — reserved for a future guard on restore.
+# shellcheck disable=SC2034
 readonly BACKUP_FORMAT_VERSION="1.0.0"
 
 # ---------------------------------------------------------------------------
@@ -316,7 +320,7 @@ cmd_restore() {
                                 | grep '^POSTGRES_USER=' | cut -d= -f2)"
                             pg_user="${pg_user:-postgres}"
                             # Wait for postgres to accept connections
-                            for i in $(seq 1 30); do
+                            for _ in $(seq 1 30); do
                                 if docker exec "$container" pg_isready -U "$pg_user" >/dev/null 2>&1; then
                                     break
                                 fi
@@ -344,7 +348,7 @@ cmd_restore() {
                                 mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                             fi
                             # Wait for mysql
-                            for i in $(seq 1 30); do
+                            for _ in $(seq 1 30); do
                                 if docker exec "${mysql_exec_args[@]}" "$container" mysqladmin ping -uroot >/dev/null 2>&1; then
                                     break
                                 fi

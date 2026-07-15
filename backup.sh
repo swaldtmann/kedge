@@ -44,11 +44,13 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+readonly SCRIPT_DIR
 
 # Tool version — derived from git tag at runtime. Drives only the help banner.
 # Falls back to "dev" for non-git checkouts (e.g. extracted tarball).
-readonly KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+KEDGE_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+readonly KEDGE_VERSION
 
 # Backup format version — schema of meta.json and snapshot layout.
 # Bump only when the on-disk format changes in a way that an older restore.sh
