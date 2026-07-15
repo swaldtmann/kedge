@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-15
+
+### Fixed
+- **`KEDGE_VERSION` fell back to `dev` when installed via symlink** —
+  `backup.sh`/`restore.sh` derived `SCRIPT_DIR` via `dirname
+  "${BASH_SOURCE[0]}"`, which leaves a symlinked entry-point unresolved.
+  drayve installs kedge as `/usr/local/bin/kedge -> /opt/kedge/backup.sh`;
+  without `readlink -f`, `git -C "$SCRIPT_DIR" describe` ran against
+  `/usr/local/bin` (not a git repo), so `KEDGE_VERSION` silently fell
+  through to `dev` and `meta.json` stamped `"kedge_version": "dev"`
+  instead of the real tag. Now resolves the symlink first. Surfaced by
+  drayve-greenfield smoke (S327e/S328); confirmed live on prod-genua
+  (CW-W-178, 2026-07-15) still showing `kedge dev` under the pinned
+  `v0.3.2`.
+
 ## [0.3.2] - 2026-05-08
 
 ### Changed
