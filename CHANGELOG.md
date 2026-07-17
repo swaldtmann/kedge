@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-07-18
+
+### Fixed
+- **`cmd_prune` never removed anything** — `restic forget` used the default
+  group-by (`host,paths`). Before #18 (stable staging path), every backup run
+  used a unique per-run staging dir as part of its backup paths, so each
+  snapshot became its own group of one and `--keep-daily/weekly/monthly` kept
+  every single one ("Prune complete" logged, 0 actually removed). Added
+  `--group-by tags` — kedge tags every snapshot identically (`kedge` +
+  `stack:<name>`) regardless of path, so grouping stays correct even if a
+  staging path is ever unstable again. Found on prod-cloud (EWH), which was
+  still running a pre-#18 build: 111 unpruned snapshots since 2026-04-01.
+  Tests: `tests/backup-prune.bats` — real local restic repo (no mocking),
+  proves both the fix (3 same-tag/different-path snapshots reduce to 2) and
+  the original bug (same setup without `--group-by`: 0 removed).
+
 ## [0.3.4] - 2026-07-15
 
 ### Fixed

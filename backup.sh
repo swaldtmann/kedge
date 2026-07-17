@@ -944,11 +944,17 @@ cmd_check() {
 cmd_prune() {
     check_prereqs
     info "Pruning old snapshots (keep: ${BACKUP_KEEP_DAILY}d ${BACKUP_KEEP_WEEKLY}w ${BACKUP_KEEP_MONTHLY}m)..."
+    # --group-by tags (EWH-W-135): restic's default group-by is host,paths. Before #18
+    # (stable staging path), every run's paths list contained a unique per-run mktemp
+    # staging dir, so each snapshot was its own group of one and keep-daily/weekly/monthly
+    # never dropped anything. Tags are stable across runs (always "kedge" + "stack:<name>"),
+    # so grouping by tags keeps forget effective even if paths ever become unstable again.
     restic forget \
         --keep-daily "$BACKUP_KEEP_DAILY" \
         --keep-weekly "$BACKUP_KEEP_WEEKLY" \
         --keep-monthly "$BACKUP_KEEP_MONTHLY" \
         --tag "kedge" \
+        --group-by tags \
         --prune
     ok "Prune complete"
 }
@@ -1032,4 +1038,7 @@ main() {
     esac
 }
 
-main "$@"
+# Nur ausfuehren, wenn direkt aufgerufen -- beim Sourcen (bats-Tests) still bleiben.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
