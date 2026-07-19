@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# tools/require-ticket-ref — commit-msg Hook (CW-W-198 Phase 2)
+#
+# Erzwingt: ein Commit, der repos/, tools/ oder .claude/ beruehrt, muss eine
+# Ticket-ID im Schema <PROJEKT>-<PERSONA>-<NNN> (Grossbuchstaben-Prefix,
+# Bindestrich-getrennt, 3+ Ziffern, z.B. CW-W-198, KIG-W-017, EWH-W-139) in
+# der Commit-Message fuehren, ODER das literale [no-ticket] als Opt-out.
+# Fehlt beides -> Ablehnung (exit 1). Berueht der Commit keinen der drei
+# Pfade -> kein Zwang, Hook laesst durch (exit 0).
+#
+# In Sub-Repos unter repos/<name>/ ist das GESAMTE Repo aus Sicht des
+# Hauptrepos "repos/<name>/..." -> git config hooks.ticketRefAlways=true
+# (gesetzt von tools/install-git-hooks --always) macht den Zwang
+# pfad-unabhaengig, jeder Commit dort braucht eine ID oder [no-ticket].
+#
+# Scope-Regex ueberschreibbar via git config hooks.ticketRefScope (Default
+# unten). Hygiene-Enforcement, kein Security-Control im S337-Sinn — deshalb
+# bewusst NICHT guard-/block-/enforce-praefigiert (sonst greift
+# .claude/hooks/guard-security-control-review.sh unnoetig).
+#
+# Deployment: tools/install-git-hooks kopiert diese Datei nach
+# <repo>/.githooks/commit-msg und setzt core.hooksPath. Git ruft den Hook
+# als: commit-msg <pfad-zur-message-datei> auf.
+#
+# Merge-/Revert-/fixup!-/squash!-Commits werden nicht erzwungen — deren
+# erste Zeile folgt Git-eigenen Konventionen, keine Ticket-ID zu erwarten.
+
+set -euo pipefail
+
+DEFAULT_SCOPE='^(repos|tools|\.claude)(/|$)'
+TICKET_RE='[A-Z][A-Z0-9]*-[A-Z]-[0-9]{3,}'
+
+MSG_FILE="${1:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+FIRST_LINE="$(head -n1 "$MSG_FILE" 2>/dev/null || true)"
+case "$FIRST_LINE" in
+  "Merge "*|"Revert "*|"fixup! "*|"squash! "*) exit 0 ;;
+esac
+
+ALWAYS="$(git config --bool hooks.ticketRefAlways 2>/dev/null || echo false)"
+SCOPE="$(git config --get hooks.ticketRefScope 2>/dev/null || echo "$DEFAULT_SCOPE")"
+
+if [ "$ALWAYS" != "true" ]; then
+  if ! git diff --cached --name-only 2>/dev/null | grep -qE "$SCOPE"; then
+    exit 0
+  fi
+fi
+
+MSG="$(cat "$MSG_FILE")"
+
+if printf '%s' "$MSG" | grep -qE "$TICKET_RE"; then
+  exit 0
+fi
+if printf '%s' "$MSG" | grep -qF '[no-ticket]'; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+require-ticket-ref: Commit beruehrt repos/, tools/ oder .claude/ (bzw. den
+konfigurierten Scope), aber die Commit-Message enthaelt weder eine Ticket-ID
+(<PROJEKT>-<PERSONA>-<NNN>, z.B. CW-W-198) noch das Opt-out [no-ticket].
+
+Beispiel:  CW-W-198: require-ticket-ref Hook gebaut
+Kein Ticket dazu? Message-Zeile ergaenzen mit: [no-ticket]
+EOF
+exit 1
