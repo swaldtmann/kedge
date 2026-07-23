@@ -405,13 +405,19 @@ run_pre_hooks() {
             mysql)
                 info "Dumping MySQL/MariaDB ($container_name)..."
                 # Extract password from container env — pass via MYSQL_PWD env var (not CLI arg)
+                # KEDGE-W-002: DBROOT ergaenzt (Mailcow-Konvention, weicht vom
+                # MYSQL_ROOT_PASSWORD/MARIADB_ROOT_PASSWORD-Standard ab). Ein
+                # Stack mit einer weiteren untypischen Var fuehrte vorher zu
+                # einem STILLEN, unauthentifizierten Dump-Versuch statt einem
+                # klaren Fehler -- kein Passwort gefunden heisst jetzt hart
+                # fehlschlagen (s. unten), nicht "einfach mal ohne versuchen".
                 local mysql_pass=""
                 mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                    | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
-                local mysql_exec_args=()
-                if [[ -n "$mysql_pass" ]]; then
-                    mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
+                    | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|DBROOT)=' | head -1 | cut -d= -f2 || true)"
+                if [[ -z "$mysql_pass" ]]; then
+                    die "MySQL/MariaDB dump for '$svc' ($container_name): no root password found via known env vars (MYSQL_ROOT_PASSWORD/MARIADB_ROOT_PASSWORD/DBROOT) — refusing an unauthenticated dump attempt that could silently produce an empty/partial backup."
                 fi
+                local mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                 # MariaDB 11+ dropped mysqldump symlink — try mariadb-dump first
                 local dump_cmd="mysqldump"
                 if docker exec "$container" which mariadb-dump &>/dev/null; then
@@ -419,6 +425,13 @@ run_pre_hooks() {
                 fi
                 docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases -uroot 2>/dev/null \
                     | gzip > "$dump_dir/${svc}_mysql.sql.gz"
+                # KEDGE-W-002: expliziter Exit-Code-Check statt sich auf `set -e`
+                # + pipefail durch den docker-exec|gzip-Pipe zu verlassen -- ein
+                # fehlgeschlagener Dump (falsches Passwort, Container-Problem)
+                # wurde vorher trotzdem unbedingt als "ok" geloggt.
+                if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
+                    die "MySQL/MariaDB dump for '$svc' ($container_name) failed (${dump_cmd} exit ${PIPESTATUS[0]}) — not marking as ok."
+                fi
                 ok "MySQL dump: ${svc}_mysql.sql.gz ($(du -h "$dump_dir/${svc}_mysql.sql.gz" | cut -f1))"
                 hooks_run=$((hooks_run + 1))
                 ;;
