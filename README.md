@@ -119,6 +119,8 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `BACKUP_KEEP_WEEKLY` | `4` | Weekly snapshots to keep |
 | `BACKUP_KEEP_MONTHLY` | `3` | Monthly snapshots to keep |
 | `BACKUP_EXCLUDE_VOLUMES` | — | Space-separated volume names to skip |
+| `SYSTEM_PATHS` | — | Space-separated absolute paths backed up alongside the stack (host-level state outside Docker, e.g. `/etc /root`) |
+| `SYSTEM_PATHS_EXCLUDE` | — | Space-separated restic `--exclude` patterns applied to `SYSTEM_PATHS` |
 | `BACKUP_POST_HOOK` | — | Command to run after successful backup |
 | `BACKUP_FAIL_HOOK` | — | Command to run after failed backup |
 | `BACKUP_HEALTHCHECK_URL` | — | Ping on success, `/fail` on error |

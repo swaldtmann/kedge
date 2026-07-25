@@ -27,6 +27,9 @@
 #   BACKUP_KEEP_MONTHLY   Retention: monthly snapshots to keep (default: 3)
 #   BACKUP_EXCLUDE_VOLUMES  Space-separated volume names to skip
 #   BACKUP_EXCLUDE_MOUNTS  Space-separated bind-mount paths to skip (e.g. "/ /proc /sys")
+#   SYSTEM_PATHS          Space-separated absolute paths backed up in addition to the
+#                         stack (e.g. "/etc /root" — for host-level state outside Docker)
+#   SYSTEM_PATHS_EXCLUDE  Space-separated restic --exclude patterns applied to SYSTEM_PATHS
 #   BACKUP_PRE_HOOK       Command to run before backup starts (optional)
 #   BACKUP_POST_HOOK      Command to run after successful backup (optional)
 #   BACKUP_FAIL_HOOK      Command to run after failed backup (optional)
@@ -71,6 +74,8 @@ BACKUP_KEEP_WEEKLY="${BACKUP_KEEP_WEEKLY:-4}"
 BACKUP_KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-3}"
 BACKUP_EXCLUDE_VOLUMES="${BACKUP_EXCLUDE_VOLUMES:-}"
 BACKUP_EXCLUDE_MOUNTS="${BACKUP_EXCLUDE_MOUNTS:-}"
+SYSTEM_PATHS="${SYSTEM_PATHS:-}"
+SYSTEM_PATHS_EXCLUDE="${SYSTEM_PATHS_EXCLUDE:-}"
 BACKUP_PRE_HOOK="${BACKUP_PRE_HOOK:-}"
 BACKUP_POST_HOOK="${BACKUP_POST_HOOK:-}"
 BACKUP_FAIL_HOOK="${BACKUP_FAIL_HOOK:-}"
@@ -818,6 +823,21 @@ cmd_discover() {
     done < <(discover_bind_mounts "$config")
 
     echo ""
+    echo "--- System Paths ---"
+    if [[ -z "$SYSTEM_PATHS" ]]; then
+        echo "  (none configured)"
+    else
+        for sp in $SYSTEM_PATHS; do
+            local exists="exists"
+            if [[ ! -e "$sp" ]]; then exists="NOT FOUND"; fi
+            echo "  $sp  [$exists]"
+        done
+        if [[ -n "$SYSTEM_PATHS_EXCLUDE" ]]; then
+            echo "  excludes: $SYSTEM_PATHS_EXCLUDE"
+        fi
+    fi
+
+    echo ""
     echo "--- Compose Files ---"
     for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml \
              docker-compose.override.yml docker-compose.override.yaml; do
@@ -896,13 +916,26 @@ cmd_backup() {
     local hostname_str
     hostname_str="$(hostname -f 2>/dev/null || hostname)"
 
-    # Build backup path list: staging dir + direct volume paths
+    # Build backup path list: staging dir + direct volume paths + system paths
     local backup_paths=("$STAGING_DIR")
     for vp in "${VOLUME_BACKUP_PATHS[@]}"; do
         backup_paths+=("$vp")
     done
+    for sp in $SYSTEM_PATHS; do
+        if [[ -e "$sp" ]]; then
+            backup_paths+=("$sp")
+        else
+            warn "SYSTEM_PATHS entry not found, skipping: $sp"
+        fi
+    done
+
+    local restic_excludes=()
+    for excl in $SYSTEM_PATHS_EXCLUDE; do
+        restic_excludes+=(--exclude "$excl")
+    done
 
     restic backup "${backup_paths[@]}" \
+        "${restic_excludes[@]}" \
         --tag "kedge" \
         --tag "stack:$(basename "$STACK_DIR")" \
         --host "$hostname_str"
@@ -1005,6 +1038,8 @@ Environment:
   BACKUP_KEEP_MONTHLY    Monthly snapshots to keep (default: 3)
   BACKUP_EXCLUDE_VOLUMES Space-separated volume names to skip
   BACKUP_EXCLUDE_MOUNTS  Space-separated bind-mount paths to skip
+  SYSTEM_PATHS           Space-separated absolute paths backed up alongside the stack
+  SYSTEM_PATHS_EXCLUDE   Space-separated restic --exclude patterns for SYSTEM_PATHS
   BACKUP_PRE_HOOK        Command before backup starts (optional)
   BACKUP_POST_HOOK       Command after successful backup (optional)
   BACKUP_FAIL_HOOK       Command after failed backup (optional)
