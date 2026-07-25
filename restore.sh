@@ -112,11 +112,15 @@ cmd_restore() {
     check_prereqs
 
     local verify_only=false
-    if [[ "${1:-}" == "--verify" ]]; then
-        verify_only=true
+    local force_live=false
+    while [[ "${1:-}" == "--verify" || "${1:-}" == "--force-live" ]]; do
+        case "$1" in
+            --verify)     verify_only=true ;;
+            --force-live) force_live=true ;;
+        esac
         shift
-        SNAPSHOT_ID="${1:-latest}"
-    fi
+    done
+    SNAPSHOT_ID="${1:-latest}"
 
     info "=== Restore started ==="
     info "Repository: $RESTIC_REPOSITORY"
@@ -224,10 +228,35 @@ cmd_restore() {
             real_vol_name="${project_name}_${vol_name}"
         fi
 
+        # CW-W-243: --verify must never write into the real, potentially-live
+        # volume — meta.json's vol_mapping says nothing about whether this
+        # host IS the backup source, so a --verify restore on the same host
+        # as the backup used to land straight in the live volume's mountpoint.
+        # --verify always restores under an isolated name instead. A genuine
+        # (non-verify) restore keeps using the real name — that's the normal
+        # disaster-recovery-onto-a-fresh-host case — but only after the
+        # live-volume guard below clears it.
+        local restore_vol_name
+        if $verify_only; then
+            restore_vol_name="${real_vol_name}_restoretest"
+        else
+            restore_vol_name="$real_vol_name"
+            if docker volume inspect "$real_vol_name" >/dev/null 2>&1; then
+                local mounted_by
+                mounted_by="$(docker ps -q --filter "volume=$real_vol_name")"
+                if [[ -n "$mounted_by" ]]; then
+                    if ! $force_live; then
+                        die "Volume '$real_vol_name' already exists AND is mounted by a running container — this restore target looks like the live backup source host. Refusing to overwrite live data. Re-run with --force-live if this is really intended."
+                    fi
+                    warn "  --force-live set: overwriting '$real_vol_name' while mounted by a running container"
+                fi
+            fi
+        fi
+
         # Create volume
-        docker volume create "$real_vol_name" >/dev/null 2>&1 || true
+        docker volume create "$restore_vol_name" >/dev/null 2>&1 || true
         local new_vol_path
-        new_vol_path="$(docker volume inspect --format '{{.Mountpoint}}' "$real_vol_name" 2>/dev/null)"
+        new_vol_path="$(docker volume inspect --format '{{.Mountpoint}}' "$restore_vol_name" 2>/dev/null)"
 
         # Source 1: Direct volume path in restic snapshot (block-level dedup backup)
         local orig_vol_path
@@ -239,18 +268,18 @@ cmd_restore() {
         fi
 
         if [[ -n "$restored_vol_dir" && -d "$restored_vol_dir" ]]; then
-            info "Restoring volume: $vol_name -> $real_vol_name [direct]"
+            info "Restoring volume: $vol_name -> $restore_vol_name [direct]"
             rsync -a --delete "$restored_vol_dir/" "$new_vol_path/"
-            ok "  $real_vol_name restored [direct]"
+            ok "  $restore_vol_name restored [direct]"
 
         # Source 2: tar.gz fallback (from collect_volumes fallback path)
         elif [[ -f "$backup_root/volumes/${vol_name}.tar.gz" ]]; then
-            info "Restoring volume: $vol_name -> $real_vol_name [tar]"
+            info "Restoring volume: $vol_name -> $restore_vol_name [tar]"
             docker run --rm \
-                -v "$real_vol_name":/data \
+                -v "$restore_vol_name":/data \
                 -v "$backup_root/volumes":/backup:ro \
                 alpine sh -c "rm -rf /data/* /data/..?* /data/.[!.]* 2>/dev/null; tar xzf /backup/${vol_name}.tar.gz -C /data"
-            ok "  $real_vol_name restored [tar]"
+            ok "  $restore_vol_name restored [tar]"
 
         else
             warn "  No data found for volume $vol_name — skipping"
@@ -269,6 +298,9 @@ cmd_restore() {
     if $verify_only; then
         ok "=== Verify complete — stack NOT started ==="
         info "Files restored to: $RESTORE_TARGET"
+        if [[ $vol_count -gt 0 ]]; then
+            info "Docker volumes restored under isolated *_restoretest names — no live volume was touched."
+        fi
         info "To start: cd $RESTORE_TARGET && $COMPOSE_CMD up -d"
         cleanup
         return 0
@@ -410,9 +442,16 @@ kedge restore ${KEDGE_VERSION} — Bare-metal Docker Compose restore
 Usage: $(basename "$0") [options] [snapshot-id]
 
 Options:
-  --list      List available snapshots
-  --verify    Restore files only, don't start stack
-  --help      Show this help
+  --list        List available snapshots
+  --verify      Restore files only, don't start stack. Docker volumes are
+                always restored under an isolated *_restoretest name — this
+                never touches a live volume, even when run on the same host
+                the backup was taken from.
+  --force-live  Only relevant for a real (non --verify) restore: skip the
+                safety check that refuses to overwrite a volume which
+                already exists AND is mounted by a running container. Use
+                only when you deliberately intend to overwrite live data.
+  --help        Show this help
 
 Arguments:
   snapshot-id  Restic snapshot to restore (default: latest)
@@ -452,4 +491,7 @@ main() {
     esac
 }
 
-main "$@"
+# Nur ausfuehren, wenn direkt aufgerufen -- beim Sourcen (bats-Tests) still bleiben.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

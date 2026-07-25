@@ -68,6 +68,21 @@ export RESTORE_TARGET=/opt/myapp
 | `test.sh --keep` | Test without burning boxes after |
 | `test.sh --burn` | Clean up leftover test boxes |
 
+## Test-restores — never against the live backup source
+
+`restore.sh --verify` restores Docker volumes under an isolated `*_restoretest` name — it
+never writes into a volume that a running container has mounted, even when run on the same
+host the backup was taken from (CW-W-243). A genuine, non-`--verify` restore still refuses to
+overwrite a volume that already exists AND is mounted by a running container, unless you pass
+`--force-live`.
+
+That guard is defense in depth, not the primary safety mechanism. **The primary mechanism is:
+don't manually run `restore.sh --verify` on a production host at all.** Use `verify.sh`
+instead — it restores onto a fresh, ephemeral Hetzner Cloud box (never the backup source),
+checks that the stack actually starts and is healthy, then burns the box. That's the tool
+quarterly restore-test routines (`EWH-W-133`, `CW-W-223`) should call, not a manual SSH session
+against `prod-*`.
+
 ## Backup Targets
 
 restic supports multiple backends:
