@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-26
+
+### Added
+- **Python CLI (Phase 1 of the Reforge roadmap)** — `kedge` command, drop-in
+  replacement for `backup.sh`'s `init`/`backup`/`list`/`check`/`prune`/
+  `discover` (same commands, same env vars, same cron line). `restore` stays
+  shell-only until Phase 2. Distributed as a single self-contained `shiv`
+  zipapp (no venv/pip install needed on the target host — same "copy one
+  file, chmod +x" story as the shell scripts) as well as an installable
+  Python package (`pip install -e .` / `pyproject.toml`).
+- Full port: auto-discovery (volumes/bind-mounts/services/hot-safety),
+  restic wrapper (`--group-by tags` prune retained), volume + stack-file
+  collection, DB pre-hooks (Postgres/MySQL/MariaDB/Valkey/Redis/MongoDB,
+  including the KEDGE-W-002 hard-fail-without-password hardening), and
+  BACKUP_PRE/POST/FAIL_HOOK + healthcheck ping.
+- 114 pytest tests, 93% line coverage.
+
+### Fixed (found via live shell/python A-B testing on real Docker stacks + restic repos)
+- Hostname resolution: `socket.getfqdn()` can return a garbage reverse-DNS
+  name where `hostname -f` returns a clean one — replaced with a
+  subprocess-based helper matching the shell's `hostname -f || hostname`.
+- `BACKUP_SIZE` hook variable was always "unknown" — modern restic's
+  `stats --json` has no `total_size_formatted` field; ported the shell's
+  plain-text `restic stats` fallback.
+
 ## [0.3.5] - 2026-07-18
 
 ### Fixed

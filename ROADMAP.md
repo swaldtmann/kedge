@@ -6,7 +6,9 @@ Kedge uses named "journeys" as roadmap milestones.
 
 **Goal:** Rewrite Kedge from Shell to Python. Same commands, same behavior, better foundation for integration and testing.
 
-**Status:** Planning — v0.3.0 (Shell) is stable in production.
+**Status:** Phase 1 done (v0.4.0, 2026-07-26) — Python CLI is a verified
+drop-in replacement for `backup.sh`. v0.3.x (Shell) stays maintained in
+parallel until Python v0.5.0 is stable; nothing forces a cutover yet.
 
 ### Why Rewrite?
 
@@ -20,16 +22,27 @@ Kedge uses named "journeys" as roadmap milestones.
 
 | Phase | What | Target |
 |-------|------|--------|
-| 1 — Skeleton (v0.4.0) | Python CLI (click), port discover + backup + DB hooks + pre/post hooks | Drop-in replacement for `backup.sh` |
+| 1 — Skeleton (v0.4.0) ✅ | Python CLI (click), port discover + backup + DB hooks + pre/post hooks | Drop-in replacement for `backup.sh` — verified via live A/B runs against real Docker stacks + restic repos |
 | 2 — Restore + Verify | Port restore and verify commands, add checksum verification | Full roundtrip (backup → restore → verify) |
 | 3 — Integration | Read `stack.yaml`, multi-Compose support, JSON output, status reporting, SFTP auto-provisioning | Kedge as a Drayve-native tool |
 | 4 — Monitoring Maturity | Prometheus metrics, cron-based restore tests, Grafana backup dashboard | Backups are monitored and tested, not just made |
+
+### Distribution (decided during Phase 1)
+
+Single-file `shiv` zipapp, not `pip install` or PyInstaller. Keeps the
+exact "scp one file to `/usr/local/bin`, `chmod +x`, done" install story
+that solo (non-Drayve) hosts rely on today — no venv, no pip on the
+target host, just a compatible system Python3 (>=3.10). Works identically
+whether the target is a Drayve-managed host (which needs Python3 anyway
+for Ansible), a KIgulls host (already Python-heavy but via its own venv
+convention that kedge, as a generic public tool, doesn't need to join),
+or a plain solo box.
 
 ### Migration Path
 
 - **No breaking changes.** Same commands, same env vars, same cron entry.
 - Shell version (v0.3.x) will be maintained until Python v0.5.0 is stable.
-- Drayve backup role will switch from shell scripts to Python package.
+- Drayve backup role will switch from shell scripts to the Python package.
 
 ### Related Issues
 
