@@ -1,7 +1,6 @@
 """Env-var configuration — mirrors the "Config (overridable via env)" block
-in backup.sh (lines 68-82). Kept minimal for Phase 1 skeleton needs
-(discovery); restic/hook-specific fields land with their own sub-tasks
-(#3, #5) so this dataclass grows incrementally instead of guessing ahead.
+in backup.sh (lines 68-82). Hook-specific fields (#5) land separately so
+this dataclass keeps growing incrementally instead of guessing ahead.
 """
 
 from __future__ import annotations
@@ -10,10 +9,24 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+DEFAULT_STAGING_BASE = "/var/lib/kedge/staging"
+
 
 def _split_env(name: str) -> list[str]:
     value = os.environ.get(name, "")
     return value.split() if value else []
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() == "true"
+
+
+def _int_env(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    return int(value) if value else default
 
 
 @dataclass
@@ -26,6 +39,11 @@ class Config:
     exclude_mounts: list[str] = field(default_factory=list)
     system_paths: list[str] = field(default_factory=list)
     system_paths_exclude: list[str] = field(default_factory=list)
+    backup_stop_stack: bool = True
+    keep_daily: int = 7
+    keep_weekly: int = 4
+    keep_monthly: int = 3
+    staging_base: Path = field(default_factory=lambda: Path(DEFAULT_STAGING_BASE))
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -39,4 +57,9 @@ class Config:
             exclude_mounts=_split_env("BACKUP_EXCLUDE_MOUNTS"),
             system_paths=_split_env("SYSTEM_PATHS"),
             system_paths_exclude=_split_env("SYSTEM_PATHS_EXCLUDE"),
+            backup_stop_stack=_bool_env("BACKUP_STOP_STACK", True),
+            keep_daily=_int_env("BACKUP_KEEP_DAILY", 7),
+            keep_weekly=_int_env("BACKUP_KEEP_WEEKLY", 4),
+            keep_monthly=_int_env("BACKUP_KEEP_MONTHLY", 3),
+            staging_base=Path(os.environ.get("KEDGE_STAGING_BASE") or DEFAULT_STAGING_BASE),
         )

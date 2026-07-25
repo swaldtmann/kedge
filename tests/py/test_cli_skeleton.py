@@ -18,8 +18,7 @@ def test_version_flag():
     assert "kedge" in result.output
 
 
-def test_unported_commands_fail_loud_not_silent():
-    for cmd in ("backup", "init", "list", "check", "prune"):
-        result = CliRunner().invoke(main, [cmd])
-        assert result.exit_code != 0
-        assert isinstance(result.exception, NotImplementedError)
+def test_restore_still_unported():
+    result = CliRunner().invoke(main, ["restore"])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, NotImplementedError)

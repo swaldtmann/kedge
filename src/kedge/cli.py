@@ -1,8 +1,8 @@
 """kedge CLI — click-based entry point.
 
 Command set mirrors backup.sh 1:1 (Phase 1 goal: drop-in replacement).
-Each command is a stub until its own KEDGE-W-001 sub-task lands the real
-logic (discover -> #2, backup/init/list/check/prune -> #3).
+`kedge backup` runs Phase 1-5 but Phase 1 (DB dumps) only warns until
+KEDGE-W-001 #4 lands the real pg_dumpall/mysqldump/BGSAVE/mongodump hooks.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import json
 import click
 
 from kedge import __version__
+from kedge.commands import cmd_backup, cmd_check, cmd_init, cmd_list, cmd_prune
 from kedge.config import Config
 from kedge.discovery import build_discover_report, compose_config, format_discover_report
 from kedge.errors import KedgeError
@@ -38,15 +39,17 @@ def main() -> None:
 
 
 @main.command()
+@_handle_kedge_errors
 def init() -> None:
     """Initialize the restic repository."""
-    raise NotImplementedError("kedge init: not yet ported (KEDGE-W-001 #3)")
+    cmd_init(Config.from_env())
 
 
 @main.command()
+@_handle_kedge_errors
 def backup() -> None:
     """Run a full backup (discover + dump + collect + restic)."""
-    raise NotImplementedError("kedge backup: not yet ported (KEDGE-W-001 #3)")
+    cmd_backup(Config.from_env())
 
 
 @main.command()
@@ -57,15 +60,17 @@ def restore(snapshot: str | None) -> None:
 
 
 @main.command()
+@_handle_kedge_errors
 def check() -> None:
     """Verify repository integrity."""
-    raise NotImplementedError("kedge check: not yet ported (KEDGE-W-001 #3)")
+    cmd_check(Config.from_env())
 
 
 @main.command()
+@_handle_kedge_errors
 def prune() -> None:
     """Remove old snapshots per retention policy."""
-    raise NotImplementedError("kedge prune: not yet ported (KEDGE-W-001 #3)")
+    cmd_prune(Config.from_env())
 
 
 @main.command()
@@ -91,9 +96,10 @@ def discover(as_json: bool) -> None:
 
 
 @main.command(name="list")
+@_handle_kedge_errors
 def list_snapshots() -> None:
     """List snapshots (alias: snapshots)."""
-    raise NotImplementedError("kedge list: not yet ported (KEDGE-W-001 #3)")
+    cmd_list(Config.from_env())
 
 
 main.add_command(list_snapshots, name="snapshots")
