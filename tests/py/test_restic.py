@@ -132,3 +132,19 @@ def test_stats_size_formatted_unparseable(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert restic.stats_size_formatted(_cfg()) == "unknown"
+
+
+def test_stats_size_formatted_falls_back_to_plain_text_parse(monkeypatch):
+    """Modern restic's --json has no total_size_formatted (only a raw byte
+    count) — confirmed live against restic 0.19.0. This fallback is
+    load-bearing, not a hypothetical edge case."""
+    def fake_run(cmd, env, capture_output, text, check):
+        if "--json" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout='{"total_size":461,"total_file_count":13}')
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout="Stats in restore-size mode:\n     Snapshots processed:  1\n        Total File Count:  13\n              Total Size:  461 B\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert restic.stats_size_formatted(_cfg()) == "461 B"

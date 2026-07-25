@@ -111,3 +111,78 @@ def test_cmd_backup_restarts_stack_and_cleans_staging_on_failure(monkeypatch, tm
 
     assert restart_calls, "start_stack must be called to restore a running stack on failure"
     assert not (cfg.staging_base / cfg.stack_dir.name).exists()
+
+
+def _stub_happy_path(monkeypatch):
+    monkeypatch.setattr(commands.restic, "repo_initialized", lambda cfg: True)
+    monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
+    monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
+    monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: 0)
+    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: False)
+    monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: [])
+    monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: None)
+    monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: None)
+    monkeypatch.setattr(commands.restic, "backup", lambda *a, **kw: None)
+    monkeypatch.setattr(commands, "start_stack", lambda *a, **kw: None)
+    monkeypatch.setattr(commands.restic, "print_latest_snapshot", lambda cfg: None)
+    monkeypatch.setattr(commands.restic, "latest_snapshot_short_id", lambda cfg: "abc123")
+    monkeypatch.setattr(commands.restic, "stats_size_formatted", lambda cfg: "1.2 GiB")
+    monkeypatch.setattr(commands, "hostname", lambda: "test-host")
+
+
+def test_cmd_backup_fires_pre_and_post_hook_with_context(monkeypatch, tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    _stub_happy_path(monkeypatch)
+
+    hook_calls = []
+    monkeypatch.setattr(commands, "run_hook", lambda cmd, name, ctx: hook_calls.append((name, ctx)))
+
+    cfg = _cfg(tmp_path, backup_pre_hook="echo pre", backup_post_hook="echo post")
+    commands.cmd_backup(cfg)
+
+    names = [name for name, _ in hook_calls]
+    assert names == ["pre-hook", "post-hook"]
+    post_ctx = hook_calls[1][1]
+    assert post_ctx.snapshot == "abc123"
+    assert post_ctx.size == "1.2 GiB"
+    assert post_ctx.hostname == "test-host"
+    assert post_ctx.stack == cfg.stack_dir.name
+
+
+def test_cmd_backup_fires_ok_healthcheck(monkeypatch, tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    _stub_happy_path(monkeypatch)
+
+    hc_calls = []
+    monkeypatch.setattr(commands, "ping_healthcheck", lambda url, status, ctx: hc_calls.append((url, status)))
+
+    cfg = _cfg(tmp_path, backup_healthcheck_url="https://hc.example.com/x")
+    commands.cmd_backup(cfg)
+
+    assert hc_calls == [("https://hc.example.com/x", "ok")]
+
+
+def test_cmd_backup_fires_fail_hook_and_healthcheck_on_error(monkeypatch, tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    _stub_happy_path(monkeypatch)
+
+    def boom(*a, **kw):
+        raise RuntimeError("restic exploded")
+
+    monkeypatch.setattr(commands.restic, "backup", boom)
+
+    hook_calls = []
+    hc_calls = []
+    # mimic real run_hook's/ping_healthcheck's own empty-cmd/no-url no-op guard,
+    # since here we mock the function itself rather than its subprocess call
+    monkeypatch.setattr(commands, "run_hook", lambda cmd, name, ctx: hook_calls.append((name, ctx)) if cmd else None)
+    monkeypatch.setattr(commands, "ping_healthcheck", lambda url, status, ctx: hc_calls.append((url, status, ctx)) if url else None)
+
+    cfg = _cfg(tmp_path, backup_fail_hook="echo fail", backup_healthcheck_url="https://hc.example.com/x")
+    with pytest.raises(RuntimeError, match="restic exploded"):
+        commands.cmd_backup(cfg)
+
+    names = [name for name, _ in hook_calls]
+    assert names == ["fail-hook"]
+    assert hook_calls[0][1].error == "restic exploded"
+    assert hc_calls == [("https://hc.example.com/x", "fail", hook_calls[0][1])]

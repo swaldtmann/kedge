@@ -1,6 +1,10 @@
 """Env-var configuration — mirrors the "Config (overridable via env)" block
-in backup.sh (lines 68-82). Hook-specific fields (#5) land separately so
-this dataclass keeps growing incrementally instead of guessing ahead.
+in backup.sh (lines 68-82).
+
+No separate /etc/kedge-backup.env parser: cron sources that file into the
+shell environment before invoking the binary (`. /etc/kedge-backup.env &&
+kedge backup`), so os.environ already has everything by the time
+Config.from_env() runs — same as it does for backup.sh. Nothing to port.
 """
 
 from __future__ import annotations
@@ -44,6 +48,10 @@ class Config:
     keep_weekly: int = 4
     keep_monthly: int = 3
     staging_base: Path = field(default_factory=lambda: Path(DEFAULT_STAGING_BASE))
+    backup_pre_hook: str = ""
+    backup_post_hook: str = ""
+    backup_fail_hook: str = ""
+    backup_healthcheck_url: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -62,4 +70,8 @@ class Config:
             keep_weekly=_int_env("BACKUP_KEEP_WEEKLY", 4),
             keep_monthly=_int_env("BACKUP_KEEP_MONTHLY", 3),
             staging_base=Path(os.environ.get("KEDGE_STAGING_BASE") or DEFAULT_STAGING_BASE),
+            backup_pre_hook=os.environ.get("BACKUP_PRE_HOOK", ""),
+            backup_post_hook=os.environ.get("BACKUP_POST_HOOK", ""),
+            backup_fail_hook=os.environ.get("BACKUP_FAIL_HOOK", ""),
+            backup_healthcheck_url=os.environ.get("BACKUP_HEALTHCHECK_URL", ""),
         )

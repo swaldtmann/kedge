@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from kedge import log, restic
@@ -16,8 +17,13 @@ from kedge.discovery import check_hot_safety, compose_config
 from kedge.docker_stack import start_stack, stop_stack
 from kedge.errors import KedgeError
 from kedge.hooks import run_pre_hooks
+from kedge.lifecycle_hooks import HookContext, ping_healthcheck, run_hook
 from kedge.prereqs import check_prereqs
 from kedge.system import hostname
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def cmd_init(cfg: Config) -> None:
@@ -69,15 +75,17 @@ def cmd_backup(cfg: Config) -> None:
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True)
 
-    config = compose_config(cfg.stack_dir, prereqs.compose_cmd)
-
-    if not cfg.backup_stop_stack:
-        all_safe, _ = check_hot_safety(config)
-        if not all_safe:
-            log.warn("Proceeding with hot backup despite unsafe services — data may be inconsistent")
-
     was_running = False
     try:
+        config = compose_config(cfg.stack_dir, prereqs.compose_cmd)
+
+        if not cfg.backup_stop_stack:
+            all_safe, _ = check_hot_safety(config)
+            if not all_safe:
+                log.warn("Proceeding with hot backup despite unsafe services — data may be inconsistent")
+
+        run_hook(cfg.backup_pre_hook, "pre-hook", HookContext())
+
         log.info("--- Phase 1: Database dumps ---")
         run_pre_hooks(config, cfg.stack_dir, prereqs.compose_cmd, staging_dir / "dumps")
 
@@ -105,13 +113,31 @@ def cmd_backup(cfg: Config) -> None:
         )
 
         start_stack(cfg.stack_dir, prereqs.compose_cmd, was_running)
-        was_running = False  # started above — don't double-start in finally
-    finally:
+        was_running = False  # started above — don't double-start in the except/finally paths
+    except Exception as exc:
         if was_running:
             start_stack(cfg.stack_dir, prereqs.compose_cmd, was_running)
+        fail_ctx = HookContext(
+            hostname=hostname(), stack=cfg.stack_dir.name,
+            timestamp=_utc_timestamp(), error=str(exc),
+        )
+        run_hook(cfg.backup_fail_hook, "fail-hook", fail_ctx)
+        ping_healthcheck(cfg.backup_healthcheck_url, "fail", fail_ctx)
+        raise
+    finally:
         if staging_dir.exists():
             shutil.rmtree(staging_dir)
 
     duration = int(time.monotonic() - start_time)
+    snapshot = restic.latest_snapshot_short_id(cfg)
+    size = restic.stats_size_formatted(cfg)
+
     log.ok(f"=== Backup complete ({duration}s) ===")
     restic.print_latest_snapshot(cfg)
+
+    ok_ctx = HookContext(
+        duration=str(duration), size=size, snapshot=snapshot,
+        hostname=hostname(), stack=cfg.stack_dir.name, timestamp=_utc_timestamp(),
+    )
+    run_hook(cfg.backup_post_hook, "post-hook", ok_ctx)
+    ping_healthcheck(cfg.backup_healthcheck_url, "ok", ok_ctx)

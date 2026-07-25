@@ -96,11 +96,26 @@ def prune(cfg: Config, keep_daily: int, keep_weekly: int, keep_monthly: int) -> 
 
 
 def stats_size_formatted(cfg: Config) -> str:
+    """backup.sh:963-967. Modern restic's `stats --json` has no
+    total_size_formatted field (only a raw total_size byte count) — the
+    shell version's fallback to parsing plain `restic stats`' "Total Size"
+    line is load-bearing, not dead code (confirmed live: restic 0.19.0
+    always needs it)."""
     result = subprocess.run(
         ["restic", "stats", "--json"], env=_env(cfg), capture_output=True, text=True, check=False,
     )
     try:
         data = json.loads(result.stdout)
-        return data.get("total_size_formatted", "unknown")
+        formatted = data.get("total_size_formatted")
+        if formatted:
+            return formatted
     except (ValueError, AttributeError):
-        return "unknown"
+        pass
+
+    plain = subprocess.run(["restic", "stats"], env=_env(cfg), capture_output=True, text=True, check=False)
+    for line in plain.stdout.splitlines():
+        if "Total Size" in line:
+            parts = line.split()
+            if len(parts) >= 2:
+                return " ".join(parts[-2:])
+    return "unknown"
