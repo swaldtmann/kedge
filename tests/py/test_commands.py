@@ -68,7 +68,7 @@ def test_cmd_backup_happy_path(monkeypatch, tmp_path):
     monkeypatch.setattr(commands.restic, "repo_initialized", lambda cfg: True)
     monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
     monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
-    monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, dump_dir: calls.append("pre_hooks") or 0)
+    monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: calls.append("pre_hooks") or 0)
     monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: calls.append("stop") or False)
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: calls.append("collect_volumes") or ["/data/x"])
     monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: calls.append("collect_stack_files"))
@@ -94,7 +94,7 @@ def test_cmd_backup_restarts_stack_and_cleans_staging_on_failure(monkeypatch, tm
     monkeypatch.setattr(commands.restic, "repo_initialized", lambda cfg: True)
     monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
     monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
-    monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, dump_dir: 0)
+    monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: 0)
     monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: True)  # stack WAS running
 
     def boom(*a, **kw):

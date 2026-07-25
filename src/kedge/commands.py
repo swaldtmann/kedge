@@ -79,7 +79,7 @@ def cmd_backup(cfg: Config) -> None:
     was_running = False
     try:
         log.info("--- Phase 1: Database dumps ---")
-        run_pre_hooks(config, staging_dir / "dumps")
+        run_pre_hooks(config, cfg.stack_dir, prereqs.compose_cmd, staging_dir / "dumps")
 
         log.info("--- Phase 2: Volume collection ---")
         was_running = stop_stack(cfg.stack_dir, prereqs.compose_cmd, cfg.backup_stop_stack)
