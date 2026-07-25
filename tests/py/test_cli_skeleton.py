@@ -19,7 +19,7 @@ def test_version_flag():
 
 
 def test_unported_commands_fail_loud_not_silent():
-    for cmd in ("backup", "init", "list", "check", "prune", "discover"):
+    for cmd in ("backup", "init", "list", "check", "prune"):
         result = CliRunner().invoke(main, [cmd])
         assert result.exit_code != 0
         assert isinstance(result.exception, NotImplementedError)

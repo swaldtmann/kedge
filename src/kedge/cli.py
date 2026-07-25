@@ -7,9 +7,28 @@ logic (discover -> #2, backup/init/list/check/prune -> #3).
 
 from __future__ import annotations
 
+import functools
+import json
+
 import click
 
 from kedge import __version__
+from kedge.config import Config
+from kedge.discovery import build_discover_report, compose_config, format_discover_report
+from kedge.errors import KedgeError
+from kedge.prereqs import check_prereqs
+
+
+def _handle_kedge_errors(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except KedgeError as exc:
+            click.echo(f"ERR  {exc}", err=True)
+            raise SystemExit(1) from None
+
+    return wrapper
 
 
 @click.group()
@@ -51,9 +70,24 @@ def prune() -> None:
 
 @main.command()
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable JSON output.")
+@_handle_kedge_errors
 def discover(as_json: bool) -> None:
     """Dry-run: show what would be backed up."""
-    raise NotImplementedError("kedge discover: not yet ported (KEDGE-W-001 #2)")
+    cfg = Config.from_env()
+    prereqs = check_prereqs(cfg)
+    config = compose_config(cfg.stack_dir, prereqs.compose_cmd)
+    report = build_discover_report(
+        stack_dir=cfg.stack_dir,
+        compose_config_dict=config,
+        exclude_volumes=cfg.exclude_volumes,
+        exclude_mounts=cfg.exclude_mounts,
+        system_paths=cfg.system_paths,
+        system_paths_exclude=cfg.system_paths_exclude,
+    )
+    if as_json:
+        click.echo(json.dumps(report, indent=2))
+    else:
+        click.echo(format_discover_report(report))
 
 
 @main.command(name="list")
