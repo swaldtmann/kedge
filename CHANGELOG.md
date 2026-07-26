@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`kedge restore` / `kedge verify` / `kedge burn` (Phase 2 of the Reforge
+  roadmap, KEDGE-W-003)** — Python port of `restore.sh`/`verify.sh`: bare-metal
+  restore (stack files, external bind mounts, Docker volumes direct+tar,
+  live-volume guard from CW-W-243), DB dump import (Postgres/MySQL/MariaDB/
+  MongoDB), and the Hetzner ephemeral-box restore-verification roundtrip.
+- **Checksum verify (issue #1)** — never built in the shell version. `kedge
+  backup` now fingerprints every volume and DB dump it collects (sha256 over
+  a sorted per-file manifest) into `meta.json`'s new `checksums` key. `kedge
+  restore` recomputes the same fingerprint on the restored data and hard-fails
+  (`KedgeError`) on any mismatch. A snapshot without a `checksums` key (e.g.
+  one made by `backup.sh`) is treated as "nothing to verify", not an error —
+  restore stays fully cross-compatible in both directions.
+- 73 new pytest tests (187 total), 93% line coverage.
+
+### Verified
+- Live cross-tool roundtrip on real Docker stacks + local restic repos:
+  `backup.sh` snapshot restored with `kedge restore --verify` (tar-fallback
+  volume, MySQL data byte-identical), and `kedge backup` snapshot restored
+  with `restore.sh` (full restore incl. compose up, MySQL data byte-identical).
+  Proves `meta.json` stays a shared format regardless of which tool wrote or
+  read it.
+
 ## [0.4.0] - 2026-07-26
 
 ### Added

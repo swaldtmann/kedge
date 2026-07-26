@@ -23,7 +23,7 @@ parallel until Python v0.5.0 is stable; nothing forces a cutover yet.
 | Phase | What | Target |
 |-------|------|--------|
 | 1 — Skeleton (v0.4.0) ✅ | Python CLI (click), port discover + backup + DB hooks + pre/post hooks | Drop-in replacement for `backup.sh` — verified via live A/B runs against real Docker stacks + restic repos |
-| 2 — Restore + Verify | Port restore and verify commands, add checksum verification | Full roundtrip (backup → restore → verify) |
+| 2 — Restore + Verify (KEDGE-W-003) ✅ | Port restore and verify commands, add checksum verification | Full roundtrip (backup → restore → verify) — verified live, including bash↔python cross-restore (snapshot made by one tool, restored by the other, both directions) |
 | 3 — Integration | Read `stack.yaml`, multi-Compose support, JSON output, status reporting, SFTP auto-provisioning | Kedge as a Drayve-native tool |
 | 4 — Monitoring Maturity | Prometheus metrics, cron-based restore tests, Grafana backup dashboard | Backups are monitored and tested, not just made |
 
