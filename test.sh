@@ -86,22 +86,7 @@ check_prereqs() {
 # SSH helpers
 # ---------------------------------------------------------------------------
 
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -o BatchMode=yes"
-
-ssh_box() {
-    local ip="$1"
-    shift
-    if [[ $# -le 1 ]]; then
-        ssh $SSH_OPTS "root@$ip" "$@"
-    else
-        # Same argv-join-then-remote-reparse issue as verify.sh's ssh_box --
-        # see comment there. %q-quote each piece so `$`/backtick in e.g. a
-        # backup password survive as literal data.
-        local remote_cmd
-        remote_cmd="$(printf '%q ' "$@")"
-        ssh $SSH_OPTS "root@$ip" "$remote_cmd"
-    fi
-}
+source "$SCRIPT_DIR/lib/ssh.sh"
 
 wait_for_ssh() {
     local ip="$1" max=120 elapsed=0
