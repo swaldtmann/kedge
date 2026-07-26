@@ -43,6 +43,7 @@ class Config:
     exclude_mounts: list[str] = field(default_factory=list)
     system_paths: list[str] = field(default_factory=list)
     system_paths_exclude: list[str] = field(default_factory=list)
+    sqlite_wal_checkpoint_paths: list[str] = field(default_factory=list)
     backup_stop_stack: bool = True
     keep_daily: int = 7
     keep_weekly: int = 4
@@ -65,6 +66,7 @@ class Config:
             exclude_mounts=_split_env("BACKUP_EXCLUDE_MOUNTS"),
             system_paths=_split_env("SYSTEM_PATHS"),
             system_paths_exclude=_split_env("SYSTEM_PATHS_EXCLUDE"),
+            sqlite_wal_checkpoint_paths=_split_env("SQLITE_WAL_CHECKPOINT_PATHS"),
             backup_stop_stack=_bool_env("BACKUP_STOP_STACK", True),
             keep_daily=_int_env("BACKUP_KEEP_DAILY", 7),
             keep_weekly=_int_env("BACKUP_KEEP_WEEKLY", 4),

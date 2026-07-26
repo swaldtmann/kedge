@@ -11,6 +11,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from kedge.engines import engine_for_image
+
 ENV_FILE_CANDIDATES = (".env", ".env.local", ".env.production")
 COMPOSE_FILE_LISTING = (
     "docker-compose.yml",
@@ -19,15 +21,6 @@ COMPOSE_FILE_LISTING = (
     "compose.yaml",
     "docker-compose.override.yml",
     "docker-compose.override.yaml",
-)
-
-# Image-substring -> db type. Order doesn't matter, first match wins per
-# category (mirrors the shell case statement, backup.sh:248-259).
-_DB_TYPE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("postgres", ("postgres", "postgis")),
-    ("mysql", ("mariadb", "mysql")),
-    ("valkey", ("valkey", "redis")),
-    ("mongo", ("mongo",)),
 )
 
 # backup.sh:264-303 — known crash-consistent images, safe for hot backup
@@ -100,12 +93,11 @@ def discover_services(config: dict) -> list[tuple[str, str]]:
 
 
 def detect_db_type(image: str) -> str:
-    """backup.sh:248-259 — match against the image name, tag stripped."""
-    image_name = image.split(":", 1)[0]
-    for db_type, substrings in _DB_TYPE_PATTERNS:
-        if any(s in image_name for s in substrings):
-            return db_type
-    return ""
+    """backup.sh:248-259 — match against the image name, tag stripped.
+    KEDGE-W-004: delegates to the DB engine registry (kedge.engines) instead
+    of a locally-kept pattern list."""
+    engine = engine_for_image(image)
+    return engine.name if engine else ""
 
 
 def is_hot_safe_image(image: str) -> bool:

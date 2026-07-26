@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import gzip
 import json
 import subprocess
 
 import pytest
 
+from kedge import docker_stack as docker_stack_module
 from kedge.errors import KedgeError
 from kedge import restore
 
@@ -300,87 +300,10 @@ def test_restore_volumes_verify_only_uses_restoretest_name(monkeypatch, tmp_path
 
 
 # --- dump import ---------------------------------------------------------------
-
-def test_import_postgres_success(monkeypatch, tmp_path):
-    dump_path = tmp_path / "db_postgres.sql.gz"
-    with gzip.open(dump_path, "wb") as gz:
-        gz.write(b"SQL DUMP")
-
-    monkeypatch.setattr(restore.docker_stack, "container_for_service", lambda *a: "c-db")
-    monkeypatch.setattr(restore.docker_stack, "container_env", lambda c: {"POSTGRES_USER": "admin"})
-    monkeypatch.setattr(restore, "_wait_until", lambda *a, **kw: True)
-
-    captured = {}
-
-    def fake_run(cmd, **kwargs):
-        if "psql" in cmd:
-            captured["cmd"] = cmd
-            captured["stdin"] = kwargs.get("stdin")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    restore._import_postgres(["docker", "compose"], tmp_path, dump_path, "db")
-
-    assert "-U" in captured["cmd"] and "admin" in captured["cmd"]
-    # -d postgres (maintenance DB, always exists) — not the pg_user-named DB,
-    # which need not exist. Regression guard for the silent dump-only data loss
-    # found in the live verify roundtrip (POSTGRES_USER != POSTGRES_DB).
-    assert captured["cmd"][captured["cmd"].index("-d") + 1] == "postgres"
-
-
-def test_import_postgres_no_container_warns_and_skips(monkeypatch, tmp_path):
-    monkeypatch.setattr(restore.docker_stack, "container_for_service", lambda *a: "")
-    calls = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(a) or subprocess.CompletedProcess([], 0))
-    restore._import_postgres(["docker", "compose"], tmp_path, tmp_path / "x.sql.gz", "db")
-    assert calls == []
-
-
-def test_import_mysql_uses_password_priority(monkeypatch, tmp_path):
-    dump_path = tmp_path / "db_mysql.sql.gz"
-    with gzip.open(dump_path, "wb") as gz:
-        gz.write(b"SQL DUMP")
-
-    monkeypatch.setattr(restore.docker_stack, "container_for_service", lambda *a: "c-db")
-    monkeypatch.setattr(
-        restore.docker_stack, "container_env",
-        lambda c: {"MYSQL_ROOT_PASSWORD": "correct", "MARIADB_ROOT_PASSWORD": "wrong"},
-    )
-    monkeypatch.setattr(restore, "_wait_until", lambda *a, **kw: True)
-
-    captured = {}
-
-    def fake_run(cmd, **kwargs):
-        if "mysql" in cmd and "-uroot" in cmd:
-            captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    restore._import_mysql(["docker", "compose"], tmp_path, dump_path, "db")
-
-    assert "MYSQL_PWD=correct" in captured["cmd"]
-
-
-def test_import_mongo_streams_raw_archive(monkeypatch, tmp_path):
-    dump_path = tmp_path / "db_mongo.archive.gz"
-    dump_path.write_bytes(b"BSON archive bytes")
-
-    monkeypatch.setattr(restore.docker_stack, "container_for_service", lambda *a: "c-db")
-
-    captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["stdin_bytes"] = kwargs["stdin"].read()
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    restore._import_mongo(["docker", "compose"], tmp_path, dump_path, "db")
-
-    assert captured["cmd"] == ["docker", "exec", "-i", "c-db", "mongorestore", "--archive", "--gzip"]
-    assert captured["stdin_bytes"] == b"BSON archive bytes"
-
+#
+# The per-engine import implementations (_import_postgres et al.) moved to
+# kedge.engines (KEDGE-W-004) -- their tests moved with them, see
+# test_engines.py. Only the generic suffix-dispatch loop stays here.
 
 def test_import_dumps_dispatches_by_suffix(monkeypatch, tmp_path, capsys):
     dumps_dir = tmp_path / "dumps"
@@ -389,7 +312,7 @@ def test_import_dumps_dispatches_by_suffix(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(restore, "compose_config", lambda target, cmd: {"services": {"db": {"image": "postgres:16"}}})
     monkeypatch.setattr(restore, "discover_services", lambda config: [("db", "postgres:16")])
     monkeypatch.setattr(restore, "detect_db_type", lambda image: "postgres")
-    monkeypatch.setattr(restore.docker_stack, "container_for_service", lambda *a: "")  # -> warn+skip, proves dispatch happened
+    monkeypatch.setattr(docker_stack_module, "container_for_service", lambda *a: "")  # -> warn+skip, proves dispatch happened
 
     up_calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: up_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, stdout=""))

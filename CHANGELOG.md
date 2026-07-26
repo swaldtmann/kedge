@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **DB engine registry (`kedge.engines`, KEDGE-W-004)** — one descriptor per
+  database engine (image patterns, dump, import, healthcheck bash snippet)
+  instead of the same DB type hand-defined in `discovery.py`/`hooks.py`/
+  `restore.py`/`verify.py` separately. Postgres/MySQL+MariaDB/Valkey+Redis/
+  MongoDB moved onto it with unchanged behavior; the MariaDB
+  mysqladmin/mysql-vs-mariadb-admin/mariadb binary gap (KEDGE-W-003) is
+  closed for restore-import and verify-healthcheck too (the dump hook
+  already had the fallback, the other two never picked it up — exactly the
+  bug this registry exists to prevent).
+- **SQLite engine** (`prod-poki`) — `SQLITE_WAL_CHECKPOINT_PATHS` env var
+  runs a real `PRAGMA wal_checkpoint(TRUNCATE)` (stdlib `sqlite3`, no
+  external binary) before a WAL-mode SQLite bind-mount gets tarred, so the
+  plain `.db` file is a standalone-consistent snapshot on its own.
+- **InfluxDB engine** (`prod-multi01`, real fleet version 2.6) —
+  `influx backup`/`influx restore --full` (v2), `influxd backup -portable`
+  (v1, dump-only — v1 restore needs a stopped target with a clean data dir,
+  documented as unsupported rather than faked). Verified live against real
+  `influxdb:2.7` containers: backup one instance, restore into a fresh one,
+  data byte-identical.
+- 238 pytest tests (was 191), coverage 87-99% across the touched modules.
+
 ### Fixed
 - **`verify` box defaults were all dead** — the hardcoded server-type
   fallback chain (`cpx23`→`cpx21`→`cax11`) was fully retired by Hetzner's

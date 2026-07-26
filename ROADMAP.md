@@ -57,6 +57,51 @@ or a plain solo box.
 | [#3](https://codeberg.org/StephanWaldtmann/kedge/issues/3) SFTP Provisioning | Phase 3 |
 | [#4](https://codeberg.org/StephanWaldtmann/kedge/issues/4) Multi-Compose | Phase 3 |
 
+## DB Engine Registry (KEDGE-W-004) ✅
+
+**Goal:** one descriptor per DB engine instead of the same DB type hand-defined
+in up to four places (discovery pattern, dump hook, restore import, verify
+healthcheck) — the gap between them was exactly how the MariaDB
+mysql/mysqladmin-vs-mariadb/mariadb-admin binary split (KEDGE-W-003) slipped
+through: the dump hook got a fallback, restore's import and verify's
+healthcheck never did.
+
+**Status:** done. `kedge.engines` is now the single registry consumed by
+`discovery.py`/`hooks.py`/`restore.py`/`verify.py`. Postgres/MySQL(+MariaDB)/
+Valkey(+Redis)/MongoDB moved onto it unchanged in behavior (238 pytest tests
+green, including the moved ones); the MariaDB import/healthcheck gap is
+closed as part of the move (regression-tested against a synthetic
+mariadb:11-shaped container with no mysql/mysqladmin binaries).
+
+Two new engines added as the registry's first real test of scaling to a
+new DB type:
+- **SQLite** (`prod-poki`, bind-mount, WAL mode) — no container image to
+  auto-discover (SQLite is an embedded library inside poki's own app image),
+  so no `image_patterns`; instead a `SQLITE_WAL_CHECKPOINT_PATHS` env var
+  (config.py, same shape as the existing `SYSTEM_PATHS`) runs a WAL
+  checkpoint (`PRAGMA wal_checkpoint(TRUNCATE)`, real stdlib `sqlite3`, no
+  external binary) before the bind-mount gets tarred like any other external
+  mount — makes the plain `.db` file standalone-consistent without depending
+  on capturing the `-wal`/`-shm` sidecar files atomically.
+- **InfluxDB** (`prod-multi01`, real fleet version 2.6 per `/Users/sw/claudes-welt/cowork/servers.yaml`)
+  — full v2 dump/restore (`influx backup`/`influx restore --full`, token from
+  `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN`/`INFLUX_TOKEN`), verified live against
+  real `influxdb:2.7` containers (backup one instance, restore into a
+  completely fresh one, data byte-identical). v1 (`influxd backup -portable`)
+  is dump-only — v1 OSS restore needs the target stopped with a clean data
+  dir first, which doesn't fit this integration's "docker-exec while
+  running" shape for any engine, so v1 import raises a clear error instead
+  of silently doing the wrong thing.
+
+Backlog, explicitly not done here (registry design proven to scale with two
+real new engines first — Elasticsearch/OpenSearch and ClickHouse are a
+separate follow-up, not blocked on anything technical here):
+
+| Issue | Note |
+|-------|------|
+| Elasticsearch/OpenSearch | Real (Zammad, currently disabled) |
+| ClickHouse | Growing fleet presence H1/2026 |
+
 ## Not Planned
 
 | Topic | Reason |

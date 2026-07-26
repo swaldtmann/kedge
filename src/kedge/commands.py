@@ -16,6 +16,7 @@ from kedge.collect import collect_stack_files, collect_volumes, write_metadata
 from kedge.config import Config
 from kedge.discovery import check_hot_safety, compose_config
 from kedge.docker_stack import start_stack, stop_stack
+from kedge.engines import checkpoint_wal_paths
 from kedge.errors import KedgeError
 from kedge.hooks import run_pre_hooks
 from kedge.lifecycle_hooks import HookContext, ping_healthcheck, run_hook
@@ -89,6 +90,14 @@ def cmd_backup(cfg: Config) -> None:
 
         log.info("--- Phase 1: Database dumps ---")
         run_pre_hooks(config, cfg.stack_dir, prereqs.compose_cmd, staging_dir / "dumps")
+
+        if cfg.sqlite_wal_checkpoint_paths:
+            # KEDGE-W-004: SQLite (e.g. prod-poki) has no container image to
+            # auto-discover a dump hook for -- its bind-mount already gets
+            # tarred like any other external mount (collect.py), this just
+            # makes the plain .db file in that mount self-consistent first.
+            log.info("--- Phase 1b: SQLite WAL checkpoints ---")
+            checkpoint_wal_paths(cfg.sqlite_wal_checkpoint_paths)
 
         log.info("--- Phase 2: Volume collection ---")
         was_running = stop_stack(cfg.stack_dir, prereqs.compose_cmd, cfg.backup_stop_stack)

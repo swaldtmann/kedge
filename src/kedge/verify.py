@@ -22,6 +22,7 @@ from pathlib import Path
 
 from kedge import log
 from kedge.config import Config
+from kedge.engines import build_healthcheck_case_block
 from kedge.errors import KedgeError
 from kedge.lifecycle_hooks import run_hook
 
@@ -38,7 +39,7 @@ apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync curl >/dev/nu
 systemctl enable --now docker
 """
 
-_HEALTHCHECK_SCRIPT = r"""set -euo pipefail
+_HEALTHCHECK_SCRIPT_HEAD = r"""set -euo pipefail
 STACK_DIR="$1"
 cd "$STACK_DIR"
 
@@ -83,62 +84,7 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
     [ -z "$CONTAINER" ] && continue
 
     case "$IMAGE" in
-        *postgres*|*postgis*)
-            PG_USER=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
-                | grep '^POSTGRES_USER=' | cut -d= -f2)
-            PG_USER="${PG_USER:-postgres}"
-            if docker exec "$CONTAINER" pg_isready -U "$PG_USER" >/dev/null 2>&1; then
-                echo "  PASS: PostgreSQL [$svc] accepting connections"
-            else
-                echo "  FAIL: PostgreSQL [$svc] not ready"
-                FAILURES=$((FAILURES + 1))
-            fi
-            DB_CHECKED=$((DB_CHECKED + 1))
-            CHECKS=$((CHECKS + 1))
-            ;;
-        *mariadb*|*mysql*)
-            ROOT_PASS=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
-                | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)
-            if docker exec "$CONTAINER" mysqladmin ping -uroot "-p${ROOT_PASS}" >/dev/null 2>&1; then
-                echo "  PASS: MySQL/MariaDB [$svc] accepting connections"
-            else
-                echo "  FAIL: MySQL/MariaDB [$svc] not responding"
-                FAILURES=$((FAILURES + 1))
-            fi
-            DB_CHECKED=$((DB_CHECKED + 1))
-            CHECKS=$((CHECKS + 1))
-            ;;
-        *valkey*|*redis*)
-            if docker exec "$CONTAINER" sh -c 'command -v valkey-cli >/dev/null && valkey-cli PING 2>/dev/null || redis-cli PING 2>/dev/null' | grep -qi pong; then
-                echo "  PASS: Valkey/Redis [$svc] responding to PING"
-            else
-                PASS=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
-                    | grep -E '^(VALKEY|REDIS)_PASSWORD=' | head -1 | cut -d= -f2 || true)
-                if [ -n "$PASS" ]; then
-                    if docker exec "$CONTAINER" sh -c "command -v valkey-cli >/dev/null && valkey-cli -a '$PASS' PING 2>/dev/null || redis-cli -a '$PASS' PING 2>/dev/null" | grep -qi pong; then
-                        echo "  PASS: Valkey/Redis [$svc] responding to PING [with auth]"
-                    else
-                        echo "  FAIL: Valkey/Redis [$svc] not responding"
-                        FAILURES=$((FAILURES + 1))
-                    fi
-                else
-                    echo "  WARN: Valkey/Redis [$svc] PING failed [may need auth]"
-                fi
-            fi
-            DB_CHECKED=$((DB_CHECKED + 1))
-            CHECKS=$((CHECKS + 1))
-            ;;
-        *mongo*)
-            if docker exec "$CONTAINER" mongosh --eval 'db.runCommand({ping:1})' >/dev/null 2>&1; then
-                echo "  PASS: MongoDB [$svc] responding"
-            else
-                echo "  FAIL: MongoDB [$svc] not responding"
-                FAILURES=$((FAILURES + 1))
-            fi
-            DB_CHECKED=$((DB_CHECKED + 1))
-            CHECKS=$((CHECKS + 1))
-            ;;
-    esac
+{db_case_block}    esac
 done
 
 if [ "$DB_CHECKED" -eq 0 ]; then
@@ -187,6 +133,12 @@ echo "CHECKS=$CHECKS"
 echo "FAILURES=$FAILURES"
 echo "CONTAINERS=$CONTAINERS_RUNNING/$CONTAINERS_TOTAL"
 """
+
+# KEDGE-W-004: the `case "$IMAGE" in ... esac` DB-connectivity arms are built
+# from the DB engine registry (kedge.engines) instead of being hand-written
+# here — a plain string .replace(), not .format(): the script is full of
+# bash ${...}/$(...) syntax that a real .format() call would choke on.
+_HEALTHCHECK_SCRIPT = _HEALTHCHECK_SCRIPT_HEAD.replace("{db_case_block}", build_healthcheck_case_block())
 
 
 # Defaults aktualisiert 2026-07-26 (KEDGE-W-003 Live-Blocker): die alte Kette

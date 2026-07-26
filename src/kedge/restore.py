@@ -7,7 +7,6 @@ taken from.
 
 from __future__ import annotations
 
-import gzip
 import json
 import shutil
 import subprocess
@@ -17,10 +16,11 @@ from pathlib import Path
 
 import click
 
-from kedge import docker_stack, log, restic
+from kedge import log, restic
 from kedge.checksums import verify_restore_checksums
 from kedge.config import Config
 from kedge.discovery import compose_config, detect_db_type, discover_services
+from kedge.engines import ENGINES
 from kedge.errors import KedgeError
 from kedge.prereqs import detect_compose_cmd
 
@@ -191,87 +191,13 @@ def _restore_volumes(
     return restored
 
 
-def _wait_until(predicate, attempts: int = 30, interval: float = 2.0) -> bool:
-    for _ in range(attempts):
-        if predicate():
-            return True
-        time.sleep(interval)
-    return False
-
-
-def _import_postgres(compose_cmd: list[str], restore_target: Path, dump_path: Path, svc: str) -> None:
-    container = docker_stack.container_for_service(restore_target, compose_cmd, svc)
-    if not container:
-        log.warn(f"  Container for {svc} not running — skip dump import")
-        return
-    pg_user = docker_stack.container_env(container).get("POSTGRES_USER") or "postgres"
-    if not _wait_until(
-        lambda: subprocess.run(
-            ["docker", "exec", container, "pg_isready", "-U", pg_user], capture_output=True, check=False,
-        ).returncode == 0,
-    ):
-        log.warn("  PostgreSQL not ready after 60s — attempting import anyway")
-    # -d postgres: the maintenance DB always exists. Without it, psql connects
-    # to a DB named after pg_user, which need not exist (POSTGRES_DB may differ
-    # from POSTGRES_USER) — the pg_dumpall stream (which carries its own
-    # \connect/CREATE DATABASE) then never gets applied and the failure is
-    # swallowed as "may be harmless", i.e. silent data loss on a dump-only
-    # restore. Surfaced by the live verify roundtrip (POSTGRES_USER != _DB).
-    with gzip.open(dump_path, "rb") as gz:
-        result = subprocess.run(
-            ["docker", "exec", "-i", container, "psql", "-U", pg_user, "-d", "postgres"],
-            stdin=gz, capture_output=True, text=True, check=False,
-        )
-    if result.returncode != 0:
-        log.warn(f"PostgreSQL import reported errors (may be harmless): {result.stderr[-500:]}")
-    log.ok("  PostgreSQL dump imported")
-
-
-def _import_mysql(compose_cmd: list[str], restore_target: Path, dump_path: Path, svc: str) -> None:
-    container = docker_stack.container_for_service(restore_target, compose_cmd, svc)
-    if not container:
-        log.warn(f"  Container for {svc} not running — skip dump import")
-        return
-    env = docker_stack.container_env(container)
-    mysql_pass = env.get("MYSQL_ROOT_PASSWORD") or env.get("MARIADB_ROOT_PASSWORD") or ""
-    exec_prefix = ["docker", "exec"]
-    if mysql_pass:
-        exec_prefix += ["-e", f"MYSQL_PWD={mysql_pass}"]
-    if not _wait_until(
-        lambda: subprocess.run(
-            [*exec_prefix, container, "mysqladmin", "ping", "-uroot"], capture_output=True, check=False,
-        ).returncode == 0,
-    ):
-        log.warn("  MySQL not ready after 60s — attempting import anyway")
-    with gzip.open(dump_path, "rb") as gz:
-        result = subprocess.run(
-            [*exec_prefix, "-i", container, "mysql", "-uroot"],
-            stdin=gz, capture_output=True, text=True, check=False,
-        )
-    if result.returncode != 0:
-        log.warn(f"MySQL import reported errors (may be harmless): {result.stderr[-500:]}")
-    log.ok("  MySQL dump imported")
-
-
-def _import_mongo(compose_cmd: list[str], restore_target: Path, dump_path: Path, svc: str) -> None:
-    container = docker_stack.container_for_service(restore_target, compose_cmd, svc)
-    if not container:
-        log.warn(f"  Container for {svc} not running — skip dump import")
-        return
-    with open(dump_path, "rb") as f:
-        result = subprocess.run(
-            ["docker", "exec", "-i", container, "mongorestore", "--archive", "--gzip"],
-            stdin=f, capture_output=True, text=True, check=False,
-        )
-    if result.returncode != 0:
-        log.warn(f"MongoDB import reported errors: {result.stderr[-500:]}")
-    log.ok("  MongoDB dump imported")
-
-
-_DUMP_IMPORTERS = (
-    ("_postgres.sql.gz", _import_postgres),
-    ("_mysql.sql.gz", _import_mysql),
-    ("_mongo.archive.gz", _import_mongo),
+# KEDGE-W-004: per-engine import implementations (_import_postgres et al.)
+# moved to kedge.engines, alongside their matching dump() -- one place per
+# engine instead of a hand-synced copy here. Derived straight from the
+# registry so a new engine's dump_suffix/import_ automatically participates,
+# no edit needed in this module.
+_DUMP_IMPORTERS = tuple(
+    (engine.dump_suffix, engine.import_) for engine in ENGINES if engine.dump_suffix and engine.import_
 )
 
 
