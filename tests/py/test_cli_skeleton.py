@@ -16,6 +16,12 @@ def test_version_flag():
     result = CliRunner().invoke(main, ["--version"])
     assert result.exit_code == 0
     assert "kedge" in result.output
+    # __version__ now derives from installed dist-info (single source of truth,
+    # pyproject.toml), not a hardcoded constant that drifted to 0.4.0.dev0.
+    from importlib.metadata import version
+
+    assert version("kedge") in result.output
+    assert "0.4.0.dev0" not in result.output
 
 
 def test_restore_without_restic_env_fails_cleanly():

@@ -13,10 +13,12 @@ logic twice.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from kedge import log
 from kedge.config import Config
@@ -32,7 +34,7 @@ SSH_OPTS = ["-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
 _BOOTSTRAP_SCRIPT = """set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync >/dev/null 2>&1
+apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync curl >/dev/null 2>&1
 systemctl enable --now docker
 """
 
@@ -187,28 +189,50 @@ echo "CONTAINERS=$CONTAINERS_RUNNING/$CONTAINERS_TOTAL"
 """
 
 
+# Defaults aktualisiert 2026-07-26 (KEDGE-W-003 Live-Blocker): die alte Kette
+# cpx23/cpx21/cax11 ist bei Hetzner im Zuge der "Standardisierung und
+# Preisanpassung" 2026 fuer Neubestellungen komplett zurueckgezogen (an nbg1/
+# fsn1/hel1 alle "Available: no"). Aktuell neu-erstellbar + x86 + guenstig:
+# cx23 nur an hel1 (EUR 0.0088/h, 2 vCPU/4 GB) als Default, cpx22/cpx12 als
+# ueberall verfuegbare Fallbacks. Default-Location deshalb hel1 (dort ist cx23
+# verfuegbar). Default-Kontext kigulls-test existiert nicht mehr (2026-07-26
+# geloescht) -> greenfields (Wegwerfbox-Kontext, Byrd-CLAUDE.md-Konvention).
+DEFAULT_CONTEXT = "greenfields"
+DEFAULT_SERVER_TYPE = "cx23"
+DEFAULT_LOCATION = "hel1"
+SERVER_TYPE_FALLBACKS = ("cx23", "cpx22", "cpx12")
+LOCATION_FALLBACKS = ("hel1", "nbg1", "fsn1")
+
+# shiv zipapp built by `shiv` (see dev deps) — analogous to verify.sh's
+# $SCRIPT_DIR/restore.sh reference, i.e. repo-relative by default,
+# overridable via KEDGE_BINARY for installed (non-checkout) deployments.
+DEFAULT_KEDGE_BINARY = str(Path(__file__).resolve().parent.parent.parent / "dist" / "kedge")
+
+
 @dataclass
 class VerifyConfig:
-    hcloud_context: str = "kigulls-test"
+    hcloud_context: str = DEFAULT_CONTEXT
     hcloud_token: str = ""
-    server_type: str = "cpx23"
-    location: str = "nbg1"
+    server_type: str = DEFAULT_SERVER_TYPE
+    location: str = DEFAULT_LOCATION
     ssh_key_name: str = "stephan@waldtmann.de"
     restore_target: str = DEFAULT_RESTORE_TARGET
     post_hook: str = ""
     fail_hook: str = ""
+    kedge_binary: str = DEFAULT_KEDGE_BINARY
 
     @classmethod
     def from_env(cls) -> "VerifyConfig":
         return cls(
-            hcloud_context=os.environ.get("HCLOUD_CONTEXT") or "kigulls-test",
+            hcloud_context=os.environ.get("HCLOUD_CONTEXT") or DEFAULT_CONTEXT,
             hcloud_token=os.environ.get("HCLOUD_TOKEN", ""),
-            server_type=os.environ.get("VERIFY_SERVER_TYPE") or "cpx23",
-            location=os.environ.get("VERIFY_LOCATION") or "nbg1",
+            server_type=os.environ.get("VERIFY_SERVER_TYPE") or DEFAULT_SERVER_TYPE,
+            location=os.environ.get("VERIFY_LOCATION") or DEFAULT_LOCATION,
             ssh_key_name=os.environ.get("SSH_KEY_NAME") or "stephan@waldtmann.de",
             restore_target=os.environ.get("RESTORE_TARGET") or DEFAULT_RESTORE_TARGET,
             post_hook=os.environ.get("VERIFY_POST_HOOK", ""),
             fail_hook=os.environ.get("VERIFY_FAIL_HOOK", ""),
+            kedge_binary=os.environ.get("KEDGE_BINARY") or DEFAULT_KEDGE_BINARY,
         )
 
 
@@ -245,6 +269,8 @@ def check_verify_prereqs(cfg: Config, vcfg: VerifyConfig) -> None:
     missing = [tool for tool in ("hcloud", "ssh", "scp", "restic") if shutil.which(tool) is None]
     if missing:
         raise KedgeError(f"Required: {' '.join(missing)}")
+    if not os.path.isfile(vcfg.kedge_binary):
+        raise KedgeError(f"kedge binary not found at {vcfg.kedge_binary} — build it first with shiv")
     if not cfg.restic_repository:
         raise KedgeError("RESTIC_REPOSITORY not set")
     if not cfg.restic_password and not cfg.restic_password_file:
@@ -275,8 +301,8 @@ def create_box(vcfg: VerifyConfig, name: str) -> str:
     """verify.sh:174-206 — try server type/location combos in order,
     de-duplicated, first successful create wins."""
     env = _hcloud_env(vcfg)
-    types = list(dict.fromkeys([vcfg.server_type, "cpx23", "cpx21", "cax11"]))
-    locations = list(dict.fromkeys([vcfg.location, "nbg1", "fsn1"]))
+    types = list(dict.fromkeys([vcfg.server_type, *SERVER_TYPE_FALLBACKS]))
+    locations = list(dict.fromkeys([vcfg.location, *LOCATION_FALLBACKS]))
 
     created = False
     for stype in types:
@@ -343,11 +369,48 @@ def bootstrap_box(ip: str) -> None:
     log.ok(f"Bootstrap complete ({ip})")
 
 
+def upload_kedge_binary(ip: str, vcfg: VerifyConfig) -> None:
+    """verify.sh:464 — scp the restore logic onto the box. Python port ships
+    the whole `kedge` shiv zipapp instead of just restore.sh, since `kedge
+    restore` (not a standalone restore script) is what Step 2 below invokes."""
+    log.info(f"Uploading kedge binary to {ip}...")
+    result = subprocess.run(
+        ["scp", *SSH_OPTS, vcfg.kedge_binary, f"root@{ip}:/usr/local/bin/kedge"],
+        capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise KedgeError(f"Failed to upload kedge binary to {ip}")
+    subprocess.run(["ssh", *SSH_OPTS, f"root@{ip}", "chmod", "+x", "/usr/local/bin/kedge"], check=True)
+    log.ok(f"kedge binary uploaded ({ip})")
+
+
+def upload_local_repo(ip: str, repository: str) -> None:
+    """verify.sh:469-473 — local restic repos aren't reachable from the box,
+    so copy them over first. Remote repos (sftp:/s3:) are reachable directly,
+    nothing to do."""
+    if not repository.startswith("/"):
+        return
+    log.info("Local repo detected — copying to verify box...")
+    mkdir_cmd = f"mkdir -p {shlex.quote(os.path.dirname(repository))}"
+    subprocess.run(["ssh", *SSH_OPTS, f"root@{ip}", mkdir_cmd], check=True)
+    # rsync passes the remote path through the box's login shell over `-e ssh`
+    # (same join-unquoted mechanism as the ssh calls above). shlex.quote on the
+    # remote spec is portable across rsync flavours; `-s`/`--protect-args` would
+    # be cleaner but does not exist in openrsync/BSD-rsync (macOS default), so
+    # it would break `kedge verify` when run from such a host.
+    subprocess.run(
+        ["rsync", "-az", "-e", f"ssh {' '.join(SSH_OPTS)}",
+         f"{repository}/", f"root@{ip}:{shlex.quote(repository)}/"],
+        check=True,
+    )
+
+
 def run_health_checks(ip: str, restore_target: str) -> tuple[bool, str]:
     """Returns (all_passed, "running/total" containers string)."""
     log.info("Running health checks...")
+    remote_cmd = f"bash -s -- {shlex.quote(restore_target)}"
     result = subprocess.run(
-        ["ssh", *SSH_OPTS, f"root@{ip}", "bash", "-s", "--", restore_target],
+        ["ssh", *SSH_OPTS, f"root@{ip}", remote_cmd],
         input=_HEALTHCHECK_SCRIPT, text=True, capture_output=True, check=False,
     )
     print(result.stdout, end="")
@@ -385,20 +448,37 @@ def cmd_verify(cfg: Config, vcfg: VerifyConfig, snapshot_id: str = "latest", kee
         box_ip = create_box(vcfg, box_name)
         wait_for_ssh(box_ip)
         bootstrap_box(box_ip)
+        upload_kedge_binary(box_ip, vcfg)
+        upload_local_repo(box_ip, cfg.restic_repository)
 
         log.info("--- Step 2: Restore snapshot ---")
         password = cfg.restic_password or (
-            open(cfg.restic_password_file).read() if cfg.restic_password_file else ""
+            open(cfg.restic_password_file).read().rstrip("\n") if cfg.restic_password_file else ""
         )
-        remote_env_script = (
-            f'export RESTIC_REPOSITORY="{cfg.restic_repository}"\n'
-            f'export RESTIC_PASSWORD="{password}"\n'
-            f'export RESTORE_TARGET="{vcfg.restore_target}"\n'
-            f'kedge restore "{resolved_snapshot}"\n'
+        # verify.sh:485-492 — values go over as positional args ($1..$4) to
+        # the remote script, not interpolated into the script text. Avoids
+        # shell-injection/quoting breakage for repository/password values
+        # containing '"', '`', '$' or newlines. The args must also be
+        # shell-quoted into a *single* ssh command string: ssh joins
+        # multiple trailing argv elements with unquoted spaces and hands
+        # that string to the remote login shell to re-parse before `bash
+        # -s` ever sees $1..$4 — an unquoted '$2026' in a password gets
+        # expanded (to empty) by that remote shell first. Latent in both
+        # verify.sh:485 and this port; surfaced by the first live run with
+        # a `$`-containing restic password.
+        remote_restore_script = (
+            "set -euo pipefail\n"
+            'export RESTIC_REPOSITORY="$1"\n'
+            'export RESTIC_PASSWORD="$2"\n'
+            'export RESTORE_TARGET="$3"\n'
+            'kedge restore "$4"\n'
+        )
+        remote_args = " ".join(
+            shlex.quote(a) for a in [cfg.restic_repository, password, vcfg.restore_target, resolved_snapshot]
         )
         subprocess.run(
-            ["ssh", *SSH_OPTS, f"root@{box_ip}", "bash", "-s"],
-            input=remote_env_script, text=True, check=True,
+            ["ssh", *SSH_OPTS, f"root@{box_ip}", f"bash -s -- {remote_args}"],
+            input=remote_restore_script, text=True, check=True,
         )
 
         log.info("Waiting for services to settle...")

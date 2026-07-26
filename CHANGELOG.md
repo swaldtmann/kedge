@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`verify` box defaults were all dead** — the hardcoded server-type
+  fallback chain (`cpx23`→`cpx21`→`cax11`) was fully retired by Hetzner's
+  2026 "standardization and price adjustment" (all `Available: no` for new
+  orders at nbg1/fsn1/hel1), and the default hcloud context `kigulls-test`
+  no longer exists. `kedge verify` could not have created a box. Now
+  defaults to `cx23`@`hel1` with `cpx22`/`cpx12` fallbacks (all currently
+  orderable x86 types) and context `greenfields`. All overridable via
+  `VERIFY_SERVER_TYPE`/`VERIFY_LOCATION`/`HCLOUD_CONTEXT`. The pytest suite
+  mocked the hcloud calls, so the dead values passed green — found by
+  static review while prepping the live Hetzner test (KEDGE-W-003).
+- **`kedge verify` box provisioning was incomplete** — `cmd_verify` never
+  uploaded the `kedge` binary onto the box (`kedge restore` there would
+  have hit `command not found`) nor synced local restic repos to it before
+  restoring, both ported from `verify.sh:462-473` and now added (mocked
+  tests had hidden the gap; `KEDGE_BINARY` overrides the `dist/kedge` path).
+- **`kedge verify` restore step had three live-run risks** — the restic
+  repository/password/target were interpolated straight into the remote
+  bash script text instead of passed as positional args like
+  `verify.sh:485-492` does, so a password containing `"`/`` ` ``/`$`/newline
+  could break or silently corrupt the script on the box; a
+  `RESTIC_PASSWORD_FILE` with a trailing newline (the common case) was sent
+  unstripped, unlike bash's `$(cat ...)`; and `_BOOTSTRAP_SCRIPT` never
+  installed `curl`, which the healthcheck's HTTP-endpoint checks need. All
+  three fixed.
+- **`kedge verify`'s remote ssh commands re-split unquoted args** — ssh
+  joins trailing argv elements (repository/password/target/snapshot for
+  the restore step, the local-repo `mkdir` path, the healthcheck's
+  restore-target) with unquoted spaces into a single string handed to the
+  remote login shell, which re-parses `$`/backtick/whitespace *before* the
+  invoked `bash -s` ever sees its positional params — a live run showed an
+  unquoted `$2026` in a restic password silently expand to empty on the
+  box. Latent in both shell and python verify (`verify.sh:485` has the
+  same underlying issue), surfaced by the first live run with a
+  `$`-containing restic password. Now `shlex.quote`s every value into a
+  single ssh command string; the local-repo rsync transfer additionally
+  gets `--protect-args` (`-s`) for the same reason on its own remote hop.
+- checksum verify could never pass for tar-fallback backups (macOS/Docker-
+  Desktop, any host without direct volume mountpoints) — backup hashed the
+  .tar.gz, restore hashed the unpacked tree; surfaced by the live roundtrip.
+
 ## [0.5.0] - 2026-07-26
 
 First Python release meant to be run for real (Phase 1 + Phase 2 of the

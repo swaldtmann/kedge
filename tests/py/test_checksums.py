@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from kedge.checksums import (
     checksum_directory,
     compute_backup_checksums,
@@ -60,20 +62,24 @@ def test_compute_backup_checksums_direct_mode(monkeypatch, tmp_path):
 
 
 def test_compute_backup_checksums_tar_fallback_mode(monkeypatch, tmp_path):
+    """Tar-fallback must hash the *unpacked* content (checksum_directory),
+    not the compressed .tar.gz bytes — that's the live-found bug: it can
+    never match verify_restore_checksums' manifest of the restored tree."""
+    src_dir = tmp_path / "source-volume"
+    _make_tree(src_dir, {"data.db": b"payload", "sub/b.txt": b"world"})
+
     vol_map_dir = tmp_path / "volumes"
     vol_map_dir.mkdir()
     tar_path = vol_map_dir / "db_data.tar.gz"
-    tar_path.write_bytes(b"fake tar bytes")
+    subprocess.run(["tar", "czf", str(tar_path), "-C", str(src_dir), "."], check=True)
 
     monkeypatch.setattr("kedge.checksums.discover_volumes", lambda config: ["db_data"])
     monkeypatch.setattr("kedge.checksums.is_excluded_volume", lambda name, excl: False)
     monkeypatch.setattr("kedge.checksums.resolve_volume_name", lambda name: "stack_db_data")
     monkeypatch.setattr("kedge.checksums.resolve_volume_path", lambda vol: "")  # not a live mountpoint
 
-    from kedge.checksums import _file_sha256
-
     result = compute_backup_checksums({}, vol_map_dir, [])
-    assert result == {"db_data": _file_sha256(tar_path)}
+    assert result == {"db_data": checksum_directory(src_dir)}
 
 
 def test_compute_backup_checksums_skips_excluded_volumes(monkeypatch, tmp_path):
@@ -122,6 +128,48 @@ def test_verify_restore_checksums_detects_corrupted_volume(tmp_path):
     (vol_dir / "data.db").write_bytes(b"CORRUPTED")
 
     mismatches = verify_restore_checksums(expected, {"db_data": vol_dir}, tmp_path / "dumps")
+    assert len(mismatches) == 1
+    assert "db_data" in mismatches[0]
+    assert "checksum mismatch" in mismatches[0]
+
+
+def test_tar_fallback_checksum_roundtrip_matches_across_backup_and_restore(monkeypatch, tmp_path):
+    """End-to-end regression for the live-found bug: build a tar-fallback
+    archive exactly as collect.collect_volumes does (`tar czf ... -C <vol>
+    .`), compute the backup-side checksum, unpack the *same* tar exactly
+    as restore.py:169-178 does (`tar xzf ... -C <new_vol>`), and confirm
+    verify_restore_checksums sees a clean match — the isolated unit tests
+    for each side individually couldn't catch a manifest-vs-tar-bytes
+    mismatch, only a real roundtrip does. The corruption control must
+    still hard-fail — no fake-green introduced by the fix."""
+    src_vol = tmp_path / "source-volume"
+    _make_tree(src_vol, {"data.db": b"payload", "sub/nested.txt": b"nested content"})
+
+    vol_map_dir = tmp_path / "volumes"
+    vol_map_dir.mkdir()
+    tar_path = vol_map_dir / "db_data.tar.gz"
+    subprocess.run(["tar", "czf", str(tar_path), "-C", str(src_vol), "."], check=True)
+
+    monkeypatch.setattr("kedge.checksums.discover_volumes", lambda config: ["db_data"])
+    monkeypatch.setattr("kedge.checksums.is_excluded_volume", lambda name, excl: False)
+    monkeypatch.setattr("kedge.checksums.resolve_volume_name", lambda name: "stack_db_data")
+    monkeypatch.setattr("kedge.checksums.resolve_volume_path", lambda vol: "")  # not a live mountpoint
+
+    backup_checksums = compute_backup_checksums({}, vol_map_dir, [])
+
+    # Restore side: unpack the identical tar into a fresh dir, as restore.py
+    # does into the (re)created docker volume's mountpoint.
+    restored_vol = tmp_path / "restored-volume"
+    restored_vol.mkdir()
+    subprocess.run(["tar", "xzf", str(tar_path), "-C", str(restored_vol)], check=True)
+
+    expected = {"volumes": backup_checksums, "dumps": {}}
+    mismatches = verify_restore_checksums(expected, {"db_data": restored_vol}, tmp_path / "dumps")
+    assert mismatches == []
+
+    # Control: corrupting the restored data must still hard-fail.
+    (restored_vol / "data.db").write_bytes(b"CORRUPTED")
+    mismatches = verify_restore_checksums(expected, {"db_data": restored_vol}, tmp_path / "dumps")
     assert len(mismatches) == 1
     assert "db_data" in mismatches[0]
     assert "checksum mismatch" in mismatches[0]

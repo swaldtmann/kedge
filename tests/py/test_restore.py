@@ -323,6 +323,10 @@ def test_import_postgres_success(monkeypatch, tmp_path):
     restore._import_postgres(["docker", "compose"], tmp_path, dump_path, "db")
 
     assert "-U" in captured["cmd"] and "admin" in captured["cmd"]
+    # -d postgres (maintenance DB, always exists) — not the pg_user-named DB,
+    # which need not exist. Regression guard for the silent dump-only data loss
+    # found in the live verify roundtrip (POSTGRES_USER != POSTGRES_DB).
+    assert captured["cmd"][captured["cmd"].index("-d") + 1] == "postgres"
 
 
 def test_import_postgres_no_container_warns_and_skips(monkeypatch, tmp_path):

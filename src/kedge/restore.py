@@ -211,9 +211,15 @@ def _import_postgres(compose_cmd: list[str], restore_target: Path, dump_path: Pa
         ).returncode == 0,
     ):
         log.warn("  PostgreSQL not ready after 60s — attempting import anyway")
+    # -d postgres: the maintenance DB always exists. Without it, psql connects
+    # to a DB named after pg_user, which need not exist (POSTGRES_DB may differ
+    # from POSTGRES_USER) — the pg_dumpall stream (which carries its own
+    # \connect/CREATE DATABASE) then never gets applied and the failure is
+    # swallowed as "may be harmless", i.e. silent data loss on a dump-only
+    # restore. Surfaced by the live verify roundtrip (POSTGRES_USER != _DB).
     with gzip.open(dump_path, "rb") as gz:
         result = subprocess.run(
-            ["docker", "exec", "-i", container, "psql", "-U", pg_user],
+            ["docker", "exec", "-i", container, "psql", "-U", pg_user, "-d", "postgres"],
             stdin=gz, capture_output=True, text=True, check=False,
         )
     if result.returncode != 0:

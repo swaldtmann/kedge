@@ -15,6 +15,8 @@ works, just without the extra integrity check.
 from __future__ import annotations
 
 import hashlib
+import subprocess
+import tempfile
 from pathlib import Path
 
 from kedge.discovery import discover_volumes, is_excluded_volume, resolve_volume_name, resolve_volume_path
@@ -46,7 +48,15 @@ def checksum_directory(path: Path) -> str:
 def compute_backup_checksums(config: dict, vol_map_dir: Path, exclude_volumes: list[str]) -> dict[str, str]:
     """Call right after collect_volumes has staged tar-fallback volumes into
     vol_map_dir — hashes exactly what restic is about to back up, whether
-    direct (live docker mountpoint) or tar (vol_map_dir/<name>.tar.gz)."""
+    direct (live docker mountpoint) or tar (vol_map_dir/<name>.tar.gz).
+
+    Tar-fallback volumes are unpacked into a throwaway temp dir and hashed
+    with the same checksum_directory() the restore side uses on the
+    unpacked tree (restore.py:175 unpacks the identical tar with `tar xzf
+    ... -C <new_vol>`) — hashing the .tar.gz bytes directly can never match
+    a per-file manifest of its unpacked contents, and tar-fallback is
+    exactly the cross-platform path (macOS/Docker-Desktop backup -> Linux
+    restore) `verify` exists to exercise."""
     checksums: dict[str, str] = {}
     for vol_name in discover_volumes(config):
         if is_excluded_volume(vol_name, exclude_volumes):
@@ -59,7 +69,9 @@ def compute_backup_checksums(config: dict, vol_map_dir: Path, exclude_volumes: l
         if vol_path and Path(vol_path).is_dir():
             checksums[vol_name] = checksum_directory(Path(vol_path))
         elif tar_path.is_file():
-            checksums[vol_name] = _file_sha256(tar_path)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                subprocess.run(["tar", "xzf", str(tar_path), "-C", tmp_dir], check=True)
+                checksums[vol_name] = checksum_directory(Path(tmp_dir))
     return checksums
 
 
