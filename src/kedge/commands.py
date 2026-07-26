@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kedge import log, restic
+from kedge.checksums import compute_backup_checksums, compute_dump_checksums
 from kedge.collect import collect_stack_files, collect_volumes, write_metadata
 from kedge.config import Config
 from kedge.discovery import check_hot_safety, compose_config
@@ -96,7 +97,11 @@ def cmd_backup(cfg: Config) -> None:
         log.info("--- Phase 3: Stack files ---")
         collect_stack_files(cfg.stack_dir, config, staging_dir, cfg.exclude_mounts)
 
-        write_metadata(cfg.stack_dir, config, prereqs.compose_cmd, staging_dir)
+        checksums = {
+            "volumes": compute_backup_checksums(config, staging_dir / "volumes", cfg.exclude_volumes),
+            "dumps": compute_dump_checksums(staging_dir / "dumps"),
+        }
+        write_metadata(cfg.stack_dir, config, prereqs.compose_cmd, staging_dir, checksums=checksums)
 
         log.info("--- Phase 5: Restic backup ---")
         hostname_str = hostname()

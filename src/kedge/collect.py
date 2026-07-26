@@ -142,8 +142,13 @@ def collect_stack_files(stack_dir: Path, config: dict, target_dir: Path, exclude
     log.ok("Stack files collected")
 
 
-def write_metadata(stack_dir: Path, config: dict, compose_cmd: list[str], target: Path) -> None:
-    """backup.sh:651-696."""
+def write_metadata(
+    stack_dir: Path, config: dict, compose_cmd: list[str], target: Path,
+    checksums: dict | None = None,
+) -> None:
+    """backup.sh:651-696. `checksums` (KEDGE-W-003 #3) is a Python-only
+    addition on top of the shell format — meta.json produced by backup.sh
+    simply lacks the key, which restore treats as "nothing to verify"."""
     hostname_str = hostname()
 
     ps_result = subprocess.run(
@@ -186,6 +191,7 @@ def write_metadata(stack_dir: Path, config: dict, compose_cmd: list[str], target
         "volume_mapping": vol_map,
         "volume_paths": vol_paths,
         "docker_version": docker_version,
+        "checksums": checksums or {},
     }
     (target / "meta.json").write_text(json.dumps(metadata, indent=4) + "\n")
     log.ok("Metadata written")
