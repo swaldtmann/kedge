@@ -1,14 +1,15 @@
 """kedge CLI — click-based entry point.
 
-Command set mirrors backup.sh 1:1 (Phase 1 goal: drop-in replacement).
-`kedge backup` runs Phase 1-5 but Phase 1 (DB dumps) only warns until
-KEDGE-W-001 #4 lands the real pg_dumpall/mysqldump/BGSAVE/mongodump hooks.
+Command set mirrors backup.sh/restore.sh/verify.sh 1:1 (drop-in replacement
+goal). `kedge restore` is the KEDGE-W-003 (Phase 2) port of restore.sh.
 """
 
 from __future__ import annotations
 
 import functools
 import json
+import os
+from pathlib import Path
 
 import click
 
@@ -18,6 +19,10 @@ from kedge.config import Config
 from kedge.discovery import build_discover_report, compose_config, format_discover_report
 from kedge.errors import KedgeError
 from kedge.prereqs import check_prereqs
+from kedge.restore import cmd_restore
+from kedge.verify import VerifyConfig, cmd_burn, cmd_verify
+
+DEFAULT_RESTORE_TARGET = "/opt/stack"
 
 
 def _handle_kedge_errors(fn):
@@ -53,10 +58,18 @@ def backup() -> None:
 
 
 @main.command()
-@click.argument("snapshot", required=False)
-def restore(snapshot: str | None) -> None:
-    """Restore from a snapshot (delegates to restore.sh for now)."""
-    raise NotImplementedError("kedge restore: Phase 2 (KEDGE-W-001 follow-up)")
+@click.argument("snapshot", required=False, default="latest")
+@click.option("--verify", "verify_only", is_flag=True,
+              help="Restore files only, don't start the stack. Docker volumes are always "
+                   "restored under an isolated *_restoretest name.")
+@click.option("--force-live", "force_live", is_flag=True,
+              help="Only relevant for a real (non --verify) restore: skip the safety check "
+                   "that refuses to overwrite a volume already mounted by a running container.")
+@_handle_kedge_errors
+def restore(snapshot: str, verify_only: bool, force_live: bool) -> None:
+    """Restore a snapshot (bare-metal Docker Compose restore)."""
+    restore_target = Path(os.environ.get("RESTORE_TARGET") or DEFAULT_RESTORE_TARGET)
+    cmd_restore(Config.from_env(), restore_target, snapshot, verify_only, force_live)
 
 
 @main.command()
@@ -103,6 +116,24 @@ def list_snapshots() -> None:
 
 
 main.add_command(list_snapshots, name="snapshots")
+
+
+@main.command()
+@click.argument("snapshot", required=False, default="latest")
+@click.option("--keep", "keep_box", is_flag=True, help="Don't burn the box after verification (for debugging).")
+@_handle_kedge_errors
+def verify(snapshot: str, keep_box: bool) -> None:
+    """Restore a snapshot onto a fresh Hetzner Cloud box and run health checks."""
+    ok = cmd_verify(Config.from_env(), VerifyConfig.from_env(), snapshot, keep_box)
+    if not ok:
+        raise SystemExit(1)
+
+
+@main.command()
+@_handle_kedge_errors
+def burn() -> None:
+    """Burn leftover verify boxes."""
+    cmd_burn(VerifyConfig.from_env())
 
 
 if __name__ == "__main__":

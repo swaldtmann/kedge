@@ -18,7 +18,10 @@ def test_version_flag():
     assert "kedge" in result.output
 
 
-def test_restore_still_unported():
-    result = CliRunner().invoke(main, ["restore"])
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
+def test_restore_without_restic_env_fails_cleanly():
+    """restore is ported (KEDGE-W-003) — invoking it without RESTIC_* env
+    now fails the same way every other command does (KedgeError -> exit 1),
+    not with a NotImplementedError placeholder."""
+    result = CliRunner().invoke(main, ["restore"], env={"RESTIC_REPOSITORY": "", "RESTIC_PASSWORD": ""})
+    assert result.exit_code == 1
+    assert "RESTIC_REPOSITORY not set" in result.output
