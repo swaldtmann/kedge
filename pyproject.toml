@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kedge"
-version = "0.4.0.dev0"
-description = "Generic encrypted backup for Docker Compose stacks (Python port, Phase 1)"
+version = "0.5.0"
+description = "Generic encrypted backup for Docker Compose stacks (Python port, Phase 1+2)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"

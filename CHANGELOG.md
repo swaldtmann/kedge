@@ -7,12 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-26
+
+First Python release meant to be run for real (Phase 1 + Phase 2 of the
+Reforge roadmap together — `0.4.0` was never tagged/released, its
+Phase-1-only content is folded into this release instead). Full
+`backup` → `restore` → `verify` roundtrip now works end to end; this is
+the "Python stable" milestone the shell version's migration path names
+as the point where `v0.3.x` starts being phased out (still maintained
+in parallel, not removed).
+
 ### Added
-- **`kedge restore` / `kedge verify` / `kedge burn` (Phase 2 of the Reforge
-  roadmap, KEDGE-W-003)** — Python port of `restore.sh`/`verify.sh`: bare-metal
-  restore (stack files, external bind mounts, Docker volumes direct+tar,
-  live-volume guard from CW-W-243), DB dump import (Postgres/MySQL/MariaDB/
-  MongoDB), and the Hetzner ephemeral-box restore-verification roundtrip.
+- **Python CLI (Phase 1)** — `kedge` command, drop-in replacement for
+  `backup.sh`'s `init`/`backup`/`list`/`check`/`prune`/`discover` (same
+  commands, same env vars, same cron line). Distributed as a single
+  self-contained `shiv` zipapp (no venv/pip install needed on the target
+  host — same "copy one file, chmod +x" story as the shell scripts) as
+  well as an installable Python package (`pip install -e .` /
+  `pyproject.toml`).
+- Full port: auto-discovery (volumes/bind-mounts/services/hot-safety),
+  restic wrapper (`--group-by tags` prune retained), volume + stack-file
+  collection, DB pre-hooks (Postgres/MySQL/MariaDB/Valkey/Redis/MongoDB,
+  including the KEDGE-W-002 hard-fail-without-password hardening), and
+  BACKUP_PRE/POST/FAIL_HOOK + healthcheck ping.
+- **`kedge restore` / `kedge verify` / `kedge burn` (Phase 2, KEDGE-W-003)** —
+  Python port of `restore.sh`/`verify.sh`: bare-metal restore (stack files,
+  external bind mounts, Docker volumes direct+tar, live-volume guard from
+  CW-W-243), DB dump import (Postgres/MySQL/MariaDB/MongoDB), and the
+  Hetzner ephemeral-box restore-verification roundtrip.
 - **Checksum verify (issue #1)** — never built in the shell version. `kedge
   backup` now fingerprints every volume and DB dump it collects (sha256 over
   a sorted per-file manifest) into `meta.json`'s new `checksums` key. `kedge
@@ -20,32 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`KedgeError`) on any mismatch. A snapshot without a `checksums` key (e.g.
   one made by `backup.sh`) is treated as "nothing to verify", not an error —
   restore stays fully cross-compatible in both directions.
-- 73 new pytest tests (187 total), 93% line coverage.
-
-### Verified
-- Live cross-tool roundtrip on real Docker stacks + local restic repos:
-  `backup.sh` snapshot restored with `kedge restore --verify` (tar-fallback
-  volume, MySQL data byte-identical), and `kedge backup` snapshot restored
-  with `restore.sh` (full restore incl. compose up, MySQL data byte-identical).
-  Proves `meta.json` stays a shared format regardless of which tool wrote or
-  read it.
-
-## [0.4.0] - 2026-07-26
-
-### Added
-- **Python CLI (Phase 1 of the Reforge roadmap)** — `kedge` command, drop-in
-  replacement for `backup.sh`'s `init`/`backup`/`list`/`check`/`prune`/
-  `discover` (same commands, same env vars, same cron line). `restore` stays
-  shell-only until Phase 2. Distributed as a single self-contained `shiv`
-  zipapp (no venv/pip install needed on the target host — same "copy one
-  file, chmod +x" story as the shell scripts) as well as an installable
-  Python package (`pip install -e .` / `pyproject.toml`).
-- Full port: auto-discovery (volumes/bind-mounts/services/hot-safety),
-  restic wrapper (`--group-by tags` prune retained), volume + stack-file
-  collection, DB pre-hooks (Postgres/MySQL/MariaDB/Valkey/Redis/MongoDB,
-  including the KEDGE-W-002 hard-fail-without-password hardening), and
-  BACKUP_PRE/POST/FAIL_HOOK + healthcheck ping.
-- 114 pytest tests, 93% line coverage.
+- 187 pytest tests, 93% line coverage.
 
 ### Fixed (found via live shell/python A-B testing on real Docker stacks + restic repos)
 - Hostname resolution: `socket.getfqdn()` can return a garbage reverse-DNS
@@ -54,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `BACKUP_SIZE` hook variable was always "unknown" — modern restic's
   `stats --json` has no `total_size_formatted` field; ported the shell's
   plain-text `restic stats` fallback.
+
+### Verified
+- Live cross-tool roundtrip on real Docker stacks + local restic repos:
+  `backup.sh` snapshot restored with `kedge restore --verify` (tar-fallback
+  volume, MySQL data byte-identical), and `kedge backup` snapshot restored
+  with `restore.sh` (full restore incl. compose up, MySQL data byte-identical).
+  Proves `meta.json` stays a shared format regardless of which tool wrote or
+  read it.
 
 ## [0.3.5] - 2026-07-18
 
