@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 
 from kedge.config import Config
 from kedge.errors import KedgeError
@@ -45,6 +46,15 @@ def backup(cfg: Config, paths: list, excludes: list[str], tags: list[str], host:
     result = subprocess.run(cmd, env=_env(cfg))
     if result.returncode != 0:
         raise KedgeError("restic backup failed")
+
+
+def restore(cfg: Config, snapshot_id: str, target: Path) -> None:
+    result = subprocess.run(
+        ["restic", "restore", snapshot_id, "--target", str(target), "--tag", "kedge"],
+        env=_env(cfg),
+    )
+    if result.returncode != 0:
+        raise KedgeError(f"restic restore failed (snapshot: {snapshot_id})")
 
 
 def latest_snapshot_short_id(cfg: Config) -> str:

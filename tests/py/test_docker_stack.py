@@ -2,7 +2,7 @@
 
 import subprocess
 
-from kedge.docker_stack import is_stack_running, start_stack, stop_stack
+from kedge.docker_stack import container_env, container_for_service, is_stack_running, start_stack, stop_stack
 
 
 def test_is_stack_running_true(monkeypatch, tmp_path):
@@ -63,3 +63,29 @@ def test_start_stack_restarts_if_was_running(monkeypatch, tmp_path):
     )
     start_stack(tmp_path, ["docker", "compose"], was_running=True)
     assert calls == [["docker", "compose", "start"]]
+
+
+def test_container_for_service_returns_first_line(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, cwd, capture_output, text, check: subprocess.CompletedProcess(cmd, 0, stdout="c-db\nc-old\n"),
+    )
+    assert container_for_service(tmp_path, ["docker", "compose"], "db") == "c-db"
+
+
+def test_container_for_service_not_running_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, cwd, capture_output, text, check: subprocess.CompletedProcess(cmd, 0, stdout=""),
+    )
+    assert container_for_service(tmp_path, ["docker", "compose"], "db") == ""
+
+
+def test_container_env_parses_key_value_pairs(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, capture_output, text, check: subprocess.CompletedProcess(
+            cmd, 0, stdout="POSTGRES_USER=admin\nPATH=/usr/bin\nGARBAGE\n",
+        ),
+    )
+    assert container_env("c-db") == {"POSTGRES_USER": "admin", "PATH": "/usr/bin"}

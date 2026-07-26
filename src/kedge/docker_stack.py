@@ -33,3 +33,26 @@ def start_stack(stack_dir, compose_cmd: list[str], was_running: bool) -> None:
     log.info("Restarting stack...")
     subprocess.run([*compose_cmd, "start"], cwd=stack_dir, check=True)
     log.ok("Stack restarted")
+
+
+def container_for_service(stack_dir, compose_cmd: list[str], svc: str) -> str:
+    """First running container id for a compose service, or "" if none."""
+    result = subprocess.run(
+        [*compose_cmd, "ps", "-q", svc], cwd=stack_dir, capture_output=True, text=True, check=False,
+    )
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    return lines[0] if lines else ""
+
+
+def container_env(container: str) -> dict[str, str]:
+    """Container's env vars as a dict, parsed from `docker inspect`."""
+    result = subprocess.run(
+        ["docker", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", container],
+        capture_output=True, text=True, check=False,
+    )
+    env: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return env

@@ -29,7 +29,7 @@ class Prereqs:
     compose_cmd: list[str]
 
 
-def _detect_compose_cmd() -> list[str]:
+def detect_compose_cmd() -> list[str]:
     try:
         result = subprocess.run(
             ["docker", "compose", "version"],
@@ -56,7 +56,7 @@ def check_prereqs(cfg: Config) -> Prereqs:
     if missing:
         raise KedgeError(f"Missing required tools: {' '.join(missing)}")
 
-    compose_cmd = _detect_compose_cmd()
+    compose_cmd = detect_compose_cmd()
 
     if not _find_compose_file(cfg.stack_dir):
         raise KedgeError(f"No docker-compose file found in {cfg.stack_dir}")
