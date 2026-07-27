@@ -143,7 +143,8 @@ def dump_mysql(svc: str, container: str, container_name: str, dump_dir: Path, im
     dump_cmd = "mariadb-dump" if docker_stack.binary_exists(container, "mariadb-dump") else "mysqldump"
     dest = dump_dir / f"{svc}_mysql.sql.gz"
     ok = docker_stack.stream_gzip(
-        [container, dump_cmd, "--all-databases", "-uroot"], dest, env_vars={"MYSQL_PWD": mysql_pass},
+        [container, dump_cmd, "--all-databases", "--single-transaction", "-uroot"], dest,
+        env_vars={"MYSQL_PWD": mysql_pass},
     )
     if not ok:
         raise KedgeError(f"MySQL/MariaDB dump for '{svc}' ({container_name}) failed ({dump_cmd}) — not marking as ok.")

@@ -428,7 +428,10 @@ run_pre_hooks() {
                 if docker exec "$container" which mariadb-dump &>/dev/null; then
                     dump_cmd="mariadb-dump"
                 fi
-                docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases -uroot 2>/dev/null \
+                # --single-transaction: MVCC-consistent dump on InnoDB without holding
+                # a global read lock (borgmatic used the same flag on prod-cloud).
+                # No-op/ignored for MyISAM tables, same as upstream mysqldump behavior.
+                docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases --single-transaction -uroot 2>/dev/null \
                     | gzip > "$dump_dir/${svc}_mysql.sql.gz"
                 # KEDGE-W-002: expliziter Exit-Code-Check statt sich auf `set -e`
                 # + pipefail durch den docker-exec|gzip-Pipe zu verlassen -- ein
