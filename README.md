@@ -51,22 +51,37 @@ export RESTORE_TARGET=/opt/myapp
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `backup.sh init` | Initialize restic repository |
-| `backup.sh discover` | Dry-run: show what would be backed up |
-| `backup.sh backup` | Full backup (dumps + volumes + files → restic) |
-| `backup.sh list` | List snapshots |
-| `backup.sh check` | Verify repository integrity |
-| `backup.sh prune` | Remove old snapshots per retention policy |
-| `verify.sh [snapshot]` | Restore verification on ephemeral hcloud box |
-| `verify.sh --burn` | Clean up leftover verify boxes |
-| `restore.sh [snapshot]` | Full restore (default: latest) |
-| `restore.sh --list` | List available snapshots |
-| `restore.sh --verify` | Restore files only, don't start stack |
-| `test.sh` | Full roundtrip test on Hetzner Cloud |
-| `test.sh --keep` | Test without burning boxes after |
-| `test.sh --burn` | Clean up leftover test boxes |
+| Shell command | Python CLI equivalent | Description |
+|---------|---------|-------------|
+| `backup.sh init` | `kedge init` | Initialize restic repository |
+| `backup.sh discover` | `kedge discover [--as-json]` | Dry-run: show what would be backed up |
+| `backup.sh backup` | `kedge backup` | Full backup (dumps + volumes + files → restic) |
+| `backup.sh list` | `kedge list` (alias: `kedge snapshots`) | List snapshots |
+| `backup.sh check` | `kedge check` | Verify repository integrity |
+| `backup.sh prune` | `kedge prune` | Remove old snapshots per retention policy |
+| `verify.sh [snapshot]` | `kedge verify [snapshot] [--keep-box]` | Restore verification on ephemeral hcloud box |
+| `verify.sh --burn` | `kedge burn` | Clean up leftover verify boxes |
+| `restore.sh [snapshot]` | `kedge restore [snapshot] [--force-live]` | Full restore (default: latest) |
+| `restore.sh --verify` | `kedge restore [snapshot] --verify-only` | Restore files only, don't start stack |
+| `test.sh` | — (no CLI equivalent yet) | Full roundtrip test on Hetzner Cloud |
+| `test.sh --keep` | — | Test without burning boxes after |
+| `test.sh --burn` | — | Clean up leftover test boxes |
+
+## Python CLI
+
+Since v0.5.0, `kedge` also ships as an installable Python CLI (Shell→Python
+reforge, Phase 1+2 — see `ROADMAP.md`), same environment variables as the
+shell scripts:
+
+```bash
+pip install .          # or: pipx install .
+kedge init
+kedge backup
+kedge restore latest --verify-only
+```
+
+`restore.sh --list` has no direct CLI equivalent yet — use `kedge list`
+against the same `RESTIC_REPOSITORY` to see available snapshots first.
 
 ## Test-restores — never against the live backup source
 
