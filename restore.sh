@@ -15,6 +15,8 @@
 #   RESTIC_PASSWORD       restic encryption password (required)
 #   RESTIC_PASSWORD_FILE  Alternative: file containing the password
 #   RESTORE_TARGET        Where to restore the stack (default: /opt/stack)
+#   RESTIC_NO_LOCK        Set to "1" to pass --no-lock to restic (required for
+#                         read-only repository access, e.g. verify.sh probes)
 # =============================================================================
 
 set -euo pipefail
@@ -43,6 +45,11 @@ SNAPSHOT_ID="${1:-latest}"
 
 COMPOSE_CMD=""
 STAGING_DIR=""
+
+# --no-lock for read-only repository access (e.g. verify.sh's readonly probe key) —
+# restic otherwise tries to write a lock file even for read operations and fails.
+RESTIC_LOCK_ARGS=()
+[[ "${RESTIC_NO_LOCK:-}" == "1" ]] && RESTIC_LOCK_ARGS=(--no-lock)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -105,7 +112,7 @@ cleanup() {
 
 cmd_list() {
     check_prereqs
-    restic snapshots --tag "kedge"
+    restic snapshots "${RESTIC_LOCK_ARGS[@]}" --tag "kedge"
 }
 
 cmd_restore() {
@@ -135,7 +142,7 @@ cmd_restore() {
 
     # Phase 1: Restic restore to staging
     info "--- Phase 1: Restic restore ---"
-    restic restore "$SNAPSHOT_ID" --target "$STAGING_DIR" --tag "kedge"
+    restic restore "$SNAPSHOT_ID" "${RESTIC_LOCK_ARGS[@]}" --target "$STAGING_DIR" --tag "kedge"
 
     # Find the actual backup root (restic preserves full path).
     # Match both new stable paths (*/staging/<stack>/) and legacy mktemp paths

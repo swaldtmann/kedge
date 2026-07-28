@@ -22,9 +22,16 @@
 # Environment (optional):
 #   HCLOUD_CONTEXT        hcloud CLI context (default: kigulls-test)
 #   HCLOUD_TOKEN          Alternative: API token directly
-#   VERIFY_SERVER_TYPE    Server type (default: cpx23)
+#   VERIFY_SERVER_TYPE    Server type (default: cx23)
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
 #   SSH_KEY_NAME          SSH key in hcloud (default: stephan@waldtmann.de)
+#   RESTIC_SFTP_KEY       Private key for sftp: repositories — uploaded to the verify
+#                         box so its restic can authenticate (the box has no SSH
+#                         identity of its own). Only used when RESTIC_REPOSITORY
+#                         starts with "sftp:".
+#   RESTIC_NO_LOCK        Set to "1" when the repository credential is read-only —
+#                         restic otherwise fails even on read operations because it
+#                         tries to write a lock file.
 #   RESTORE_TARGET        Where to restore on the box (default: /opt/stack)
 #   VERIFY_POST_HOOK      Command after successful verify
 #   VERIFY_FAIL_HOOK      Command after failed verify
@@ -42,10 +49,12 @@ RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
 RESTIC_PASSWORD="${RESTIC_PASSWORD:-}"
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
 HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cpx23}"
+VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cx23}"
 VERIFY_LOCATION="${VERIFY_LOCATION:-nbg1}"
 VERIFY_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
+RESTIC_SFTP_KEY="${RESTIC_SFTP_KEY:-}"
+RESTIC_NO_LOCK="${RESTIC_NO_LOCK:-}"
 RESTORE_TARGET="${RESTORE_TARGET:-/opt/stack}"
 VERIFY_POST_HOOK="${VERIFY_POST_HOOK:-}"
 VERIFY_FAIL_HOOK="${VERIFY_FAIL_HOOK:-}"
@@ -132,8 +141,9 @@ check_prereqs() {
     # Verify snapshot exists
     info "Checking snapshot: $SNAPSHOT_ID"
     if [[ "$SNAPSHOT_ID" == "latest" ]]; then
-        local snap_check
-        snap_check="$(restic snapshots --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty' 2>/dev/null || true)"
+        local snap_check restic_lock_args=()
+        [[ "$RESTIC_NO_LOCK" == "1" ]] && restic_lock_args=(--no-lock)
+        snap_check="$(restic snapshots "${restic_lock_args[@]}" --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty' 2>/dev/null || true)"
         if [[ -z "$snap_check" ]]; then
             die "No snapshots found in repository"
         fi
@@ -168,8 +178,10 @@ wait_for_ssh() {
 
 create_box() {
     local name="$1"
-    local types=("$VERIFY_SERVER_TYPE" cpx23 cpx21 cax11)
-    local locations=("$VERIFY_LOCATION" nbg1 fsn1)
+    # cpx23/cpx21 (Gen1) don't exist in fsn1/nbg1 (Hetzner catalog only offers
+    # Gen1 cpx11-51 in ash/hil; fsn1/nbg1 got Gen2 cpx12-62) — verified live 2026-07-27.
+    local types=("$VERIFY_SERVER_TYPE" cx23 cpx22 cax11)
+    local locations=("$VERIFY_LOCATION" nbg1 fsn1 hel1)
     local created=false
 
     for stype in "${types[@]}"; do
@@ -220,6 +232,33 @@ apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync >/dev/null 2>
 systemctl enable --now docker
 BOOTSTRAP
     ok "Bootstrap complete ($ip)"
+}
+
+setup_sftp_key() {
+    local ip="$1"
+    [[ "$RESTIC_REPOSITORY" == sftp:* ]] || return 0
+    [[ -n "$RESTIC_SFTP_KEY" ]] || die "RESTIC_REPOSITORY is sftp: but RESTIC_SFTP_KEY not set — verify box has no identity to authenticate with"
+
+    # sftp:user@host:path -> user@host
+    local userhost="${RESTIC_REPOSITORY#sftp:}"
+    userhost="${userhost%%:*}"
+
+    info "Uploading sftp identity for $userhost to verify box..."
+    scp $SSH_OPTS "$RESTIC_SFTP_KEY" "root@$ip:/root/.ssh/id_verify_sftp"
+    ssh_box "$ip" bash -s -- "$userhost" <<'SFTPKEY'
+set -euo pipefail
+USERHOST="$1"
+HOST="${USERHOST#*@}"
+chmod 600 /root/.ssh/id_verify_sftp
+cat >> /root/.ssh/config <<EOC
+Host $HOST
+    Port 23
+    IdentityFile /root/.ssh/id_verify_sftp
+    IdentitiesOnly yes
+    StrictHostKeyChecking accept-new
+EOC
+SFTPKEY
+    ok "sftp identity installed on verify box"
 }
 
 # ---------------------------------------------------------------------------
@@ -453,6 +492,7 @@ cmd_verify() {
     BOX_IP="$(create_box "$BOX_NAME")"
     wait_for_ssh "$BOX_IP"
     bootstrap_box "$BOX_IP"
+    setup_sftp_key "$BOX_IP"
 
     # Step 2: Upload restore script + restic credentials
     info "--- Step 2: Upload restore script ---"
@@ -477,12 +517,13 @@ cmd_verify() {
         restic_pass_arg="$(cat "$RESTIC_PASSWORD_FILE")"
     fi
 
-    ssh_box "$BOX_IP" bash -s -- "$RESTIC_REPOSITORY" "$restic_pass_arg" "$RESTORE_TARGET" "$SNAPSHOT_ID" <<'RESTORE'
+    ssh_box "$BOX_IP" bash -s -- "$RESTIC_REPOSITORY" "$restic_pass_arg" "$RESTORE_TARGET" "$SNAPSHOT_ID" "$RESTIC_NO_LOCK" <<'RESTORE'
 set -euo pipefail
 export RESTIC_REPOSITORY="$1"
 export RESTIC_PASSWORD="$2"
 export RESTORE_TARGET="$3"
 SNAP="$4"
+export RESTIC_NO_LOCK="$5"
 
 kedge-restore "$SNAP"
 RESTORE
@@ -567,8 +608,10 @@ Environment (required):
 
 Environment (optional):
   HCLOUD_CONTEXT         hcloud CLI context (default: kigulls-test)
-  VERIFY_SERVER_TYPE     Server type (default: cpx23)
+  VERIFY_SERVER_TYPE     Server type (default: cx23)
   VERIFY_LOCATION        Datacenter (default: nbg1)
+  RESTIC_SFTP_KEY        Private key for sftp: repositories (uploaded to verify box)
+  RESTIC_NO_LOCK         Set to "1" for read-only repository credentials
   RESTORE_TARGET         Where to restore (default: /opt/stack)
   VERIFY_POST_HOOK       Command after successful verify
   VERIFY_FAIL_HOOK       Command after failed verify
