@@ -16,9 +16,9 @@
 #   test.sh --burn              Burn any leftover test boxes
 #
 # Environment:
-#   HCLOUD_CONTEXT         hcloud CLI context to use (default: kigulls-test)
+#   HCLOUD_CONTEXT         hcloud CLI context to use (default: dev_und_test_boxen)
 #   HCLOUD_TOKEN           Alternative: API token directly (overrides context)
-#   TEST_SERVER_TYPE       Server type (default: cpx23)
+#   TEST_SERVER_TYPE       Server type (default: cx23)
 #   TEST_LOCATION          Datacenter (default: nbg1)
 # =============================================================================
 
@@ -31,8 +31,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
-HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cpx23}"
+HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-dev_und_test_boxen}"
+TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cx23}"
 TEST_LOCATION="${TEST_LOCATION:-nbg1}"
 TEST_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
@@ -108,7 +108,11 @@ create_box() {
     local name="$1"
 
     # Fallback: try multiple type/location combinations (DE only)
-    local types=("$TEST_SERVER_TYPE" cpx23 cpx21 cax11)
+    # cpx23/cpx21 (Gen1) don't exist in fsn1/nbg1 (Hetzner catalog only offers
+    # Gen1 cpx11-51 in ash/hil; fsn1/nbg1 got Gen2 cpx12-62) — verified live
+    # 2026-07-27 (see verify.sh) and again 2026-07-28 (this file drifted back
+    # out of sync with that fix; keep both in lockstep).
+    local types=("$TEST_SERVER_TYPE" cx23 cpx22 cax11)
     local locations=("$TEST_LOCATION" nbg1 fsn1)
     local created=false
 
@@ -708,7 +712,7 @@ Options:
 
 Environment:
   HCLOUD_TOKEN         Hetzner Cloud API token (required)
-  TEST_SERVER_TYPE     Server type (default: cx22)
+  TEST_SERVER_TYPE     Server type (default: cx23)
   TEST_LOCATION        Datacenter (default: nbg1)
   SSH_KEY_NAME         SSH key name in hcloud (default: stephan@waldtmann.de)
   MOCKFORGE_DIR        Path to the mockforge repo (default: ../mockforge, sibling of kedge)
