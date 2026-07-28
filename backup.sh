@@ -959,11 +959,14 @@ cmd_backup() {
         restic_excludes+=(--exclude "$excl")
     done
 
+    local backup_log
+    backup_log="$(mktemp)"
     restic backup "${backup_paths[@]}" \
         "${restic_excludes[@]}" \
         --tag "kedge" \
         --tag "stack:$(basename "$STACK_DIR")" \
-        --host "$hostname_str"
+        --host "$hostname_str" \
+        | tee "$backup_log"
 
     BACKUP_SNAPSHOT="$(restic snapshots --latest 1 --json 2>/dev/null \
         | jq -r '.[0].short_id // empty' 2>/dev/null || echo "unknown")"
@@ -985,11 +988,14 @@ cmd_backup() {
     BACKUP_HOSTNAME="$hostname_str"
     BACKUP_STACK="$(basename "$STACK_DIR")"
     BACKUP_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    BACKUP_SIZE="$(restic stats --json 2>/dev/null | jq -r '.total_size_formatted // empty' 2>/dev/null || echo "unknown")"
-    if [[ "$BACKUP_SIZE" == "unknown" || -z "$BACKUP_SIZE" ]]; then
-        # Fallback: human-readable from restic stats
-        BACKUP_SIZE="$(restic stats 2>/dev/null | grep 'Total Size' | awk '{print $3, $4}' || echo "unknown")"
-    fi
+    # EWH-W-135 stats-Nebenbefund: `restic stats` re-walks the whole repo just for this
+    # log line — slow and lock-holding on big/SFTP repos. `restic backup` already prints
+    # "Added to the repository: X (Y stored)" as part of its own summary, so reuse that
+    # instead of a second full-repo scan.
+    BACKUP_SIZE="$(grep -oE 'Added to the repository: [^(]+' "$backup_log" \
+        | sed -E 's/Added to the repository: //; s/[[:space:]]+$//')"
+    [[ -z "$BACKUP_SIZE" ]] && BACKUP_SIZE="unknown"
+    rm -f "$backup_log"
 
     ok "=== Backup complete (${duration}s) ==="
     echo ""

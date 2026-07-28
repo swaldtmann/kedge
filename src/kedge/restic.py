@@ -36,16 +36,36 @@ def init(cfg: Config) -> None:
         raise KedgeError("restic init failed")
 
 
-def backup(cfg: Config, paths: list, excludes: list[str], tags: list[str], host: str) -> None:
+def backup(cfg: Config, paths: list, excludes: list[str], tags: list[str], host: str) -> str:
+    """Runs `restic backup`, streaming its output live like the shell version,
+    while also capturing it to parse the "Added to the repository: X (Y stored)"
+    summary line restic already prints — avoids a second full-repo `stats` scan
+    just for that size figure (EWH-W-135 stats-Nebenbefund). Returns the parsed
+    size, or "unknown" if the line wasn't found."""
     cmd = ["restic", "backup", *[str(p) for p in paths]]
     for excl in excludes:
         cmd += ["--exclude", excl]
     for tag in tags:
         cmd += ["--tag", tag]
     cmd += ["--host", host]
-    result = subprocess.run(cmd, env=_env(cfg))
-    if result.returncode != 0:
+    proc = subprocess.Popen(
+        cmd, env=_env(cfg), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    lines = []
+    for line in proc.stdout:
+        print(line, end="")
+        lines.append(line)
+    proc.wait()
+    if proc.returncode != 0:
         raise KedgeError("restic backup failed")
+    return _parse_added_size(lines)
+
+
+def _parse_added_size(lines: list[str]) -> str:
+    for line in lines:
+        if line.startswith("Added to the repository:"):
+            return line.split("Added to the repository:", 1)[1].split("(")[0].strip()
+    return "unknown"
 
 
 def restore(cfg: Config, snapshot_id: str, target: Path) -> None:
@@ -105,27 +125,3 @@ def prune(cfg: Config, keep_daily: int, keep_weekly: int, keep_monthly: int) -> 
         raise KedgeError("restic prune failed")
 
 
-def stats_size_formatted(cfg: Config) -> str:
-    """backup.sh:963-967. Modern restic's `stats --json` has no
-    total_size_formatted field (only a raw total_size byte count) — the
-    shell version's fallback to parsing plain `restic stats`' "Total Size"
-    line is load-bearing, not dead code (confirmed live: restic 0.19.0
-    always needs it)."""
-    result = subprocess.run(
-        ["restic", "stats", "--json"], env=_env(cfg), capture_output=True, text=True, check=False,
-    )
-    try:
-        data = json.loads(result.stdout)
-        formatted = data.get("total_size_formatted")
-        if formatted:
-            return formatted
-    except (ValueError, AttributeError):
-        pass
-
-    plain = subprocess.run(["restic", "stats"], env=_env(cfg), capture_output=True, text=True, check=False)
-    for line in plain.stdout.splitlines():
-        if "Total Size" in line:
-            parts = line.split()
-            if len(parts) >= 2:
-                return " ".join(parts[-2:])
-    return "unknown"

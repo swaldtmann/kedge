@@ -141,7 +141,7 @@ def cmd_backup(cfg: Config) -> None:
                 log.warn(f"SYSTEM_PATHS entry not found, skipping: {sp}")
 
         restic_excludes = _filter_shadowing_excludes(backup_paths, cfg.system_paths_exclude)
-        restic.backup(
+        size = restic.backup(
             cfg, backup_paths, restic_excludes,
             tags=["kedge", f"stack:{cfg.stack_dir.name}"], host=hostname_str,
         )
@@ -164,7 +164,6 @@ def cmd_backup(cfg: Config) -> None:
 
     duration = int(time.monotonic() - start_time)
     snapshot = restic.latest_snapshot_short_id(cfg)
-    size = restic.stats_size_formatted(cfg)
 
     log.ok(f"=== Backup complete ({duration}s) ===")
     restic.print_latest_snapshot(cfg)

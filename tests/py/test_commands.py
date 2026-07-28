@@ -122,11 +122,10 @@ def _stub_happy_path(monkeypatch):
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: [])
     monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: None)
     monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: None)
-    monkeypatch.setattr(commands.restic, "backup", lambda *a, **kw: None)
+    monkeypatch.setattr(commands.restic, "backup", lambda *a, **kw: "1.2 GiB")
     monkeypatch.setattr(commands, "start_stack", lambda *a, **kw: None)
     monkeypatch.setattr(commands.restic, "print_latest_snapshot", lambda cfg: None)
     monkeypatch.setattr(commands.restic, "latest_snapshot_short_id", lambda cfg: "abc123")
-    monkeypatch.setattr(commands.restic, "stats_size_formatted", lambda cfg: "1.2 GiB")
     monkeypatch.setattr(commands, "hostname", lambda: "test-host")
 
 

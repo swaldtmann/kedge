@@ -43,14 +43,29 @@ def test_init_raises_on_failure(monkeypatch):
         restic.init(_cfg())
 
 
+class _FakePopen:
+    """Minimal stand-in for subprocess.Popen — backup() streams proc.stdout
+    line-by-line and calls proc.wait(), it never touches subprocess.run()."""
+
+    def __init__(self, cmd, lines, returncode, **kwargs):
+        self.args = cmd
+        self.stdout = iter(lines)
+        self.returncode = None
+        self._exit_code = returncode
+
+    def wait(self):
+        self.returncode = self._exit_code
+        return self.returncode
+
+
 def test_backup_builds_correct_command(monkeypatch):
     captured = {}
 
-    def fake_run(cmd, env):
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0)
+        return _FakePopen(cmd, ["Added to the repository: 1.2 GiB (900 MiB stored)\n"], 0, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     restic.backup(_cfg(), ["/staging", "/data/vol1"], ["/proc"], ["kedge", "stack:x"], "myhost")
 
     assert captured["cmd"] == [
@@ -62,9 +77,34 @@ def test_backup_builds_correct_command(monkeypatch):
 
 
 def test_backup_raises_on_failure(monkeypatch):
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess([], 1))
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda cmd, **kwargs: _FakePopen(cmd, [], 1, **kwargs),
+    )
     with pytest.raises(KedgeError, match="restic backup failed"):
         restic.backup(_cfg(), ["/staging"], [], ["kedge"], "myhost")
+
+
+def test_backup_returns_added_size(monkeypatch):
+    lines = [
+        "using parent snapshot abc123\n",
+        "\n",
+        "Files:           2 new,     0 changed,     0 unmodified\n",
+        "Added to the repository: 3.976 KiB (2.978 KiB stored)\n",
+        "\n",
+        "processed 2 files, 500.035 KiB in 0:00\n",
+        "snapshot 0e9dee17 saved\n",
+    ]
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: _FakePopen(cmd, lines, 0, **kwargs))
+    assert restic.backup(_cfg(), ["/staging"], [], ["kedge"], "myhost") == "3.976 KiB"
+
+
+def test_backup_returns_unknown_when_summary_line_missing(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda cmd, **kwargs: _FakePopen(cmd, ["some unexpected output\n"], 0, **kwargs),
+    )
+    assert restic.backup(_cfg(), ["/staging"], [], ["kedge"], "myhost") == "unknown"
 
 
 def test_latest_snapshot_short_id(monkeypatch):
@@ -118,33 +158,3 @@ def test_prune_raises_on_failure(monkeypatch):
         restic.prune(_cfg(), 7, 4, 3)
 
 
-def test_stats_size_formatted(monkeypatch):
-    def fake_run(cmd, env, capture_output, text, check):
-        return subprocess.CompletedProcess(cmd, 0, stdout='{"total_size_formatted": "1.2 GiB"}')
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert restic.stats_size_formatted(_cfg()) == "1.2 GiB"
-
-
-def test_stats_size_formatted_unparseable(monkeypatch):
-    def fake_run(cmd, env, capture_output, text, check):
-        return subprocess.CompletedProcess(cmd, 0, stdout="not json")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert restic.stats_size_formatted(_cfg()) == "unknown"
-
-
-def test_stats_size_formatted_falls_back_to_plain_text_parse(monkeypatch):
-    """Modern restic's --json has no total_size_formatted (only a raw byte
-    count) — confirmed live against restic 0.19.0. This fallback is
-    load-bearing, not a hypothetical edge case."""
-    def fake_run(cmd, env, capture_output, text, check):
-        if "--json" in cmd:
-            return subprocess.CompletedProcess(cmd, 0, stdout='{"total_size":461,"total_file_count":13}')
-        return subprocess.CompletedProcess(
-            cmd, 0,
-            stdout="Stats in restore-size mode:\n     Snapshots processed:  1\n        Total File Count:  13\n              Total Size:  461 B\n",
-        )
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert restic.stats_size_formatted(_cfg()) == "461 B"
