@@ -335,7 +335,14 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
         *mariadb*|*mysql*)
             ROOT_PASS=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
                 | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)
-            if docker exec "$CONTAINER" mysqladmin ping -uroot "-p${ROOT_PASS}" >/dev/null 2>&1; then
+            # KEDGE-W-004: modern mariadb:11+ images only ship mariadb-admin, not
+            # mysqladmin -- same binary split already fixed in src/kedge/engines.py
+            # and restore.sh's dump-import path.
+            ADMIN_BIN=mysqladmin
+            if docker exec "$CONTAINER" sh -c 'command -v mariadb-admin >/dev/null 2>&1'; then
+                ADMIN_BIN=mariadb-admin
+            fi
+            if docker exec "$CONTAINER" "$ADMIN_BIN" ping -uroot "-p${ROOT_PASS}" >/dev/null 2>&1; then
                 echo "  PASS: MySQL/MariaDB [$svc] accepting connections"
             else
                 echo "  FAIL: MySQL/MariaDB [$svc] not responding"

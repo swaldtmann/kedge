@@ -386,14 +386,25 @@ cmd_restore() {
                             if [[ -n "$mysql_pass" ]]; then
                                 mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                             fi
+                            # KEDGE-W-004: modern mariadb:11+ images only ship mariadb/mariadb-admin,
+                            # not mysql/mysqladmin -- same binary split already fixed in
+                            # src/kedge/engines.py, restore.sh had the identical gap (silently
+                            # swallowed by the `|| warn` below, leaving the app DB never imported).
+                            local admin_bin="mysqladmin" client_bin="mysql"
+                            if docker exec "$container" sh -c 'command -v mariadb-admin >/dev/null 2>&1'; then
+                                admin_bin="mariadb-admin"
+                            fi
+                            if docker exec "$container" sh -c 'command -v mariadb >/dev/null 2>&1'; then
+                                client_bin="mariadb"
+                            fi
                             # Wait for mysql
                             for _ in $(seq 1 30); do
-                                if docker exec "${mysql_exec_args[@]}" "$container" mysqladmin ping -uroot >/dev/null 2>&1; then
+                                if docker exec "${mysql_exec_args[@]}" "$container" "$admin_bin" ping -uroot >/dev/null 2>&1; then
                                     break
                                 fi
                                 sleep 2
                             done
-                            gunzip -c "$dump_file" | docker exec -i "${mysql_exec_args[@]}" "$container" mysql -uroot 2>&1 \
+                            gunzip -c "$dump_file" | docker exec -i "${mysql_exec_args[@]}" "$container" "$client_bin" -uroot 2>&1 \
                                 | tail -3 || warn "MySQL import reported errors (may be harmless)"
                             ok "  MySQL dump imported"
                         fi
