@@ -130,6 +130,49 @@ def _stub_happy_path(monkeypatch):
     monkeypatch.setattr(commands, "hostname", lambda: "test-host")
 
 
+# KEDGE-W-007: SYSTEM_PATHS_EXCLUDE is passed to restic for the whole backup
+# invocation, not scoped to SYSTEM_PATHS -- an exclude entry that also matches
+# an explicit volume/staging backup path must not shadow it (prod-cloud,
+# 2026-07-27/28: "/var/lib/docker/volumes" in SYSTEM_PATHS_EXCLUDE silently
+# emptied every Docker volume backup).
+def test_filter_shadowing_excludes_drops_overlap_with_backup_path():
+    backup_paths = ["/staging/x", "/var/lib/docker/volumes/xwiki_nextcloud_base/_data"]
+    excludes = ["/var/lib/docker/volumes", "/var/lib/docker/overlay2"]
+    kept = commands._filter_shadowing_excludes(backup_paths, excludes)
+    assert kept == ["/var/lib/docker/overlay2"]
+
+
+def test_filter_shadowing_excludes_keeps_non_overlapping_and_exact_match():
+    backup_paths = ["/var/lib/docker/volumes/x/_data"]
+    assert commands._filter_shadowing_excludes(backup_paths, ["/var/log"]) == ["/var/log"]
+    # exact-path exclude (no trailing content) must also be treated as a shadow
+    assert commands._filter_shadowing_excludes(["/a/b"], ["/a/b"]) == []
+
+
+def test_cmd_backup_drops_exclude_that_shadows_a_volume_path(monkeypatch, tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    _stub_happy_path(monkeypatch)
+    monkeypatch.setattr(
+        commands, "collect_volumes",
+        lambda *a, **kw: ["/var/lib/docker/volumes/xwiki_nextcloud_base/_data"],
+    )
+
+    captured = {}
+    monkeypatch.setattr(
+        commands.restic, "backup",
+        lambda cfg, paths, excludes, **kw: captured.update(paths=paths, excludes=excludes),
+    )
+
+    cfg = _cfg(
+        tmp_path,
+        system_paths_exclude=["/var/lib/docker/volumes", "/var/lib/docker/overlay2"],
+    )
+    commands.cmd_backup(cfg)
+
+    assert "/var/lib/docker/volumes/xwiki_nextcloud_base/_data" in captured["paths"]
+    assert captured["excludes"] == ["/var/lib/docker/overlay2"]
+
+
 def test_cmd_backup_fires_pre_and_post_hook_with_context(monkeypatch, tmp_path):
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")
     _stub_happy_path(monkeypatch)

@@ -932,8 +932,30 @@ cmd_backup() {
         fi
     done
 
+    # SYSTEM_PATHS_EXCLUDE is meant to keep the broad SYSTEM_PATHS scan (e.g. /var)
+    # from redundantly re-descending into paths handled elsewhere (docker internals).
+    # restic applies --exclude globally to the whole invocation though, not scoped
+    # to SYSTEM_PATHS — an exclude entry that is a prefix of (or equal to) an
+    # explicit backup_paths entry (staging dir, direct volume paths) would silently
+    # nuke that deliberate backup target too. Drop those before passing to restic
+    # (KEDGE-W-007: this exact collision emptied every Docker volume backup on
+    # prod-cloud since the SYSTEM_PATHS_EXCLUDE entry "/var/lib/docker/volumes"
+    # shadowed every VOLUME_BACKUP_PATHS entry).
     local restic_excludes=()
     for excl in $SYSTEM_PATHS_EXCLUDE; do
+        local shadows_backup_target=false
+        for bp in "${backup_paths[@]}"; do
+            case "$bp" in
+                "$excl"|"$excl"/*)
+                    shadows_backup_target=true
+                    break
+                    ;;
+            esac
+        done
+        if $shadows_backup_target; then
+            warn "SYSTEM_PATHS_EXCLUDE entry '$excl' overlaps an explicit backup path — skipping this exclude so real data isn't dropped"
+            continue
+        fi
         restic_excludes+=(--exclude "$excl")
     done
 

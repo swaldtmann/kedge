@@ -93,3 +93,48 @@ _restored_files() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"--- System Paths ---"*"(none configured)"* ]]
 }
+
+# KEDGE-W-007: SYSTEM_PATHS_EXCLUDE is applied restic-wide, not scoped to
+# SYSTEM_PATHS -- an exclude entry that is also a prefix of an explicit
+# VOLUME_BACKUP_PATHS entry must not shadow it, or every Docker volume backup
+# silently comes back empty (prod-cloud, 2026-07-27 to 2026-07-28: all 14
+# volumes affected, "/var/lib/docker/volumes" in SYSTEM_PATHS_EXCLUDE).
+@test "SYSTEM_PATHS_EXCLUDE darf einen expliziten Docker-Volume-Pfad nicht schatten (KEDGE-W-007)" {
+  VOL_DIR="${BATS_TEST_TMPDIR}/var-lib-docker-volumes/xwiki_nextcloud_base/_data"
+  mkdir -p "$VOL_DIR"
+  echo "real-nextcloud-config-content" > "$VOL_DIR/config.php"
+
+  # collect_volumes normally resolves real Docker volumes -- stub it the same
+  # way the other tests stub check_prereqs/COMPOSE_CMD, no Docker needed to
+  # prove the exclude-vs-explicit-path interaction in cmd_backup.
+  collect_volumes() { VOLUME_BACKUP_PATHS=("$VOL_DIR"); }
+
+  export SYSTEM_PATHS_EXCLUDE="${BATS_TEST_TMPDIR}/var-lib-docker-volumes"
+  run cmd_backup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"overlaps an explicit backup path"* ]]
+
+  snap="$(restic snapshots --latest 1 --json | jq -r '.[0].short_id')"
+  files="$(_restored_files "$snap")"
+  [[ "$files" == *"config.php"* ]]
+}
+
+@test "SYSTEM_PATHS_EXCLUDE bleibt fuer nicht-ueberlappende Docker-Volume-Praefixe wirksam" {
+  VOL_DIR="${BATS_TEST_TMPDIR}/var-lib-docker-volumes/xwiki_nextcloud_base/_data"
+  mkdir -p "$VOL_DIR"
+  echo "real-nextcloud-config-content" > "$VOL_DIR/config.php"
+  collect_volumes() { VOLUME_BACKUP_PATHS=("$VOL_DIR"); }
+
+  # Exclude trifft einen ANDEREN Docker-Internals-Pfad (overlay2), nicht den
+  # expliziten Volume-Pfad selbst -- muss weiterhin greifen (kein Fix-Overreach).
+  export SYSTEM_PATHS="$SP_DIR/etc"
+  export SYSTEM_PATHS_EXCLUDE="${BATS_TEST_TMPDIR}/var-lib-docker-overlay2"
+  run cmd_backup
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"overlaps an explicit backup path"* ]]
+
+  snap="$(restic snapshots --latest 1 --json | jq -r '.[0].short_id')"
+  files="$(_restored_files "$snap")"
+  [[ "$files" == *"config.php"* ]]
+  [[ "$files" == *"kept.conf"* ]]
+}

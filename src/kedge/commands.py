@@ -28,6 +28,25 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _filter_shadowing_excludes(backup_paths: list, excludes: list[str]) -> list[str]:
+    """Drop SYSTEM_PATHS_EXCLUDE entries that would also match an explicit
+    backup path (staging dir, direct volume paths). restic applies --exclude
+    globally to the whole invocation, not scoped to SYSTEM_PATHS — an exclude
+    meant only to keep the broad SYSTEM_PATHS scan from re-descending into
+    paths handled elsewhere would otherwise silently empty those deliberate
+    backup targets too (KEDGE-W-007: "/var/lib/docker/volumes" in
+    SYSTEM_PATHS_EXCLUDE shadowed every direct Docker volume backup path)."""
+    paths_str = [str(p) for p in backup_paths]
+    kept = []
+    for excl in excludes:
+        shadows = any(bp == excl or bp.startswith(excl.rstrip("/") + "/") for bp in paths_str)
+        if shadows:
+            log.warn(f"SYSTEM_PATHS_EXCLUDE entry '{excl}' overlaps an explicit backup path — skipping this exclude so real data isn't dropped")
+            continue
+        kept.append(excl)
+    return kept
+
+
 def cmd_init(cfg: Config) -> None:
     check_prereqs(cfg)
     log.info(f"Initializing restic repository: {cfg.restic_repository}")
@@ -121,8 +140,9 @@ def cmd_backup(cfg: Config) -> None:
             else:
                 log.warn(f"SYSTEM_PATHS entry not found, skipping: {sp}")
 
+        restic_excludes = _filter_shadowing_excludes(backup_paths, cfg.system_paths_exclude)
         restic.backup(
-            cfg, backup_paths, cfg.system_paths_exclude,
+            cfg, backup_paths, restic_excludes,
             tags=["kedge", f"stack:{cfg.stack_dir.name}"], host=hostname_str,
         )
 
