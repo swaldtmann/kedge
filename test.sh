@@ -159,10 +159,37 @@ bootstrap_box() {
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync >/dev/null 2>&1
+apt-get install -y -qq docker.io docker-compose-v2 restic jq rsync python3-venv >/dev/null 2>&1
 systemctl enable --now docker
 BOOTSTRAP
     ok "Bootstrap complete ($ip)"
+}
+
+# ---------------------------------------------------------------------------
+# mockforge (synthetic Nextcloud-volume content, AFKI-W-237)
+# ---------------------------------------------------------------------------
+
+MOCKFORGE_DIR="${MOCKFORGE_DIR:-$SCRIPT_DIR/../mockforge}"
+
+deploy_mockforge() {
+    local ip="$1"
+    [[ -d "$MOCKFORGE_DIR" ]] || die "mockforge repo not found at $MOCKFORGE_DIR (set MOCKFORGE_DIR)"
+    info "Installing mockforge on $ip..."
+
+    tar -C "$MOCKFORGE_DIR" -czf /tmp/mockforge-src.tgz --exclude=.venv --exclude=.git .
+    scp $SSH_OPTS /tmp/mockforge-src.tgz "root@$ip:/tmp/mockforge-src.tgz"
+    rm -f /tmp/mockforge-src.tgz
+
+    ssh_box "$ip" bash -s <<'MOCKFORGE_INSTALL'
+set -euo pipefail
+mkdir -p /opt/mockforge
+tar -C /opt/mockforge -xzf /tmp/mockforge-src.tgz
+rm -f /tmp/mockforge-src.tgz
+python3 -m venv /opt/mockforge/.venv
+/opt/mockforge/.venv/bin/pip install -q -e /opt/mockforge
+MOCKFORGE_INSTALL
+
+    ok "mockforge installed ($ip)"
 }
 
 # ---------------------------------------------------------------------------
@@ -203,9 +230,19 @@ services:
       - ./nginx-html:/usr/share/nginx/html:ro
       - ./custom-config:/etc/nginx/conf.d:ro
 
+  # Holds nextcloud_data alive -- content is a mockforge-generated file tree,
+  # written directly to the volume's host path (KEDGE-W-007 regression case:
+  # docker-volume backup via literal host path, not a bind mount).
+  storage:
+    image: busybox:stable
+    command: ["sleep", "infinity"]
+    volumes:
+      - nextcloud_data:/data
+
 volumes:
   pg_data:
   valkey_data:
+  nextcloud_data:
 COMPOSE
 
 # Create .env
@@ -262,6 +299,21 @@ SAMPLE
     ok "Sample stack deployed and seeded ($ip)"
 }
 
+seed_nextcloud_volume() {
+    local ip="$1"
+    info "Seeding nextcloud_data volume with mockforge content ($ip)..."
+
+    ssh_box "$ip" bash -s <<'SEED'
+set -euo pipefail
+MOUNTPOINT="$(docker volume inspect teststack_nextcloud_data --format '{{ .Mountpoint }}')"
+/opt/mockforge/.venv/bin/mockforge nextcloud --out "$MOUNTPOINT" --files 300 --seed 1
+echo "=== nextcloud_data volume seeded ($MOUNTPOINT) ==="
+find "$MOUNTPOINT" -type f | wc -l
+SEED
+
+    ok "nextcloud_data volume seeded ($ip)"
+}
+
 # ---------------------------------------------------------------------------
 # Capture checksums for verification
 # ---------------------------------------------------------------------------
@@ -288,9 +340,16 @@ curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt
 # .env content
 cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt
 
+# nextcloud_data volume -- content hash + file count (KEDGE-W-007 regression case)
+NC_MOUNT="$(docker volume inspect teststack_nextcloud_data --format '{{ .Mountpoint }}')"
+find "$NC_MOUNT" -type f -exec sha256sum {} \; | awk '{print $1}' | sort | sha256sum | awk '{print $1}' \
+    > /tmp/kedge-verify/nextcloud-hash.txt
+find "$NC_MOUNT" -type f | wc -l > /tmp/kedge-verify/nextcloud-count.txt
+
 echo "=== Verification data captured ==="
 cat /tmp/kedge-verify/pg-data.txt
 cat /tmp/kedge-verify/valkey-verify.txt
+cat /tmp/kedge-verify/nextcloud-count.txt
 CHECKSUMS
 }
 
@@ -311,6 +370,10 @@ set -euo pipefail
 export STACK_DIR=/opt/test-stack
 export RESTIC_REPOSITORY=/backup/test-repo
 export RESTIC_PASSWORD="$1"
+# KEDGE-W-007 regression guard: a broad SYSTEM_PATHS_EXCLUDE entry that would
+# have shadowed the nextcloud_data docker-volume backup before the fix.
+export SYSTEM_PATHS="/var/log"
+export SYSTEM_PATHS_EXCLUDE="/var/lib/docker/volumes"
 
 # Init repo
 kedge-backup init
@@ -418,6 +481,17 @@ curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt 2>/dev/null ||
 
 # .env
 cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt 2>/dev/null || echo "ENV_FAIL" > /tmp/kedge-verify/env-content.txt
+
+# nextcloud_data volume -- content hash + file count (KEDGE-W-007 regression case)
+NC_MOUNT="$(docker volume inspect teststack_nextcloud_data --format '{{ .Mountpoint }}' 2>/dev/null || true)"
+if [[ -n "$NC_MOUNT" ]]; then
+    find "$NC_MOUNT" -type f -exec sha256sum {} \; | awk '{print $1}' | sort | sha256sum | awk '{print $1}' \
+        > /tmp/kedge-verify/nextcloud-hash.txt 2>/dev/null || echo "NEXTCLOUD_HASH_FAIL" > /tmp/kedge-verify/nextcloud-hash.txt
+    find "$NC_MOUNT" -type f | wc -l > /tmp/kedge-verify/nextcloud-count.txt 2>/dev/null || echo "0" > /tmp/kedge-verify/nextcloud-count.txt
+else
+    echo "NEXTCLOUD_VOLUME_MISSING" > /tmp/kedge-verify/nextcloud-hash.txt
+    echo "0" > /tmp/kedge-verify/nextcloud-count.txt
+fi
 VERIFY_CAPTURE
 
     # Compare: Postgres data
@@ -467,13 +541,28 @@ VERIFY_CAPTURE
         failures=$((failures + 1))
     fi
 
+    # Compare: nextcloud_data volume (KEDGE-W-007 regression case -- docker
+    # volume backup via literal host path, guarded by SYSTEM_PATHS_EXCLUDE
+    # overreach protection)
+    local src_nc_hash dst_nc_hash src_nc_count dst_nc_count
+    src_nc_hash="$(ssh_box "$src_ip" cat /tmp/kedge-verify/nextcloud-hash.txt)"
+    dst_nc_hash="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/nextcloud-hash.txt)"
+    src_nc_count="$(ssh_box "$src_ip" cat /tmp/kedge-verify/nextcloud-count.txt)"
+    dst_nc_count="$(ssh_box "$dst_ip" cat /tmp/kedge-verify/nextcloud-count.txt)"
+    if [[ "$src_nc_hash" == "$dst_nc_hash" && "$src_nc_count" == "$dst_nc_count" && "$dst_nc_count" != "0" ]]; then
+        ok "PASS: nextcloud_data volume matches ($dst_nc_count files)"
+    else
+        err "FAIL: nextcloud_data volume mismatch (src: $src_nc_count files/$src_nc_hash, dst: $dst_nc_count files/$dst_nc_hash)"
+        failures=$((failures + 1))
+    fi
+
     # Check: All containers running
     local running_count
     running_count="$(ssh_box "$dst_ip" 'docker ps --format "{{.Names}}" | wc -l')"
-    if [[ "$running_count" -ge 3 ]]; then
+    if [[ "$running_count" -ge 4 ]]; then
         ok "PASS: All containers running ($running_count)"
     else
-        err "FAIL: Only $running_count containers running (expected 3+)"
+        err "FAIL: Only $running_count containers running (expected 4+)"
         failures=$((failures + 1))
     fi
 
@@ -538,6 +627,8 @@ cmd_test() {
     # Step 2: Deploy sample stack + seed data
     info "--- Step 2: Deploy sample stack ---"
     deploy_sample_stack "$BOX_A_IP"
+    deploy_mockforge "$BOX_A_IP"
+    seed_nextcloud_volume "$BOX_A_IP"
     capture_checksums "$BOX_A_IP"
 
     # Step 3: Run backup
@@ -620,15 +711,19 @@ Environment:
   TEST_SERVER_TYPE     Server type (default: cx22)
   TEST_LOCATION        Datacenter (default: nbg1)
   SSH_KEY_NAME         SSH key name in hcloud (default: stephan@waldtmann.de)
+  MOCKFORGE_DIR        Path to the mockforge repo (default: ../mockforge, sibling of kedge)
 
 What it does:
-  1. Creates Box A (Hetzner), deploys a sample stack (Postgres + Valkey + Nginx)
+  1. Creates Box A (Hetzner), deploys a sample stack (Postgres + Valkey + Nginx +
+     a nextcloud_data docker volume seeded via mockforge -- KEDGE-W-007 regression case)
   2. Seeds test data into all services
-  3. Runs backup.sh → local restic repo
+  3. Runs backup.sh (SYSTEM_PATHS_EXCLUDE=/var/lib/docker/volumes, the exact
+     prod-bug pattern) → local restic repo
   4. Creates Box B (fresh VPS)
   5. Transfers restic repo from A to B
   6. Runs restore.sh on B
-  7. Verifies: DB rows, Valkey keys, Nginx page, .env, container count
+  7. Verifies: DB rows, Valkey keys, Nginx page, .env, nextcloud_data volume
+     (file count + content hash), container count
   8. Burns both boxes
 EOF
 }
