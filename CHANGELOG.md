@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`tools/backup-freshness-write` (DRAYVE-W-014)** — optional
+  `BACKUP_POST_HOOK` building block that writes a
+  `kedge_backup_last_success{repo="..."}` node-exporter textfile-collector
+  metric after a successful backup. Generalizes a hand-placed, unversioned
+  `/usr/local/sbin/backup-freshness-write` found on `prod-cloud` (host-specific
+  `cloud_`-prefixed metric name, wired via a `&&` after the cron call instead
+  of through kedge's own hook mechanism) into a proper repo-tracked tool.
 - **DB engine registry (`kedge.engines`, KEDGE-W-004)** — one descriptor per
   database engine (image patterns, dump, import, healthcheck bash snippet)
   instead of the same DB type hand-defined in `discovery.py`/`hooks.py`/

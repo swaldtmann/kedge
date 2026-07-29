@@ -195,6 +195,19 @@ BACKUP_HEALTHCHECK_URL=https://hc-ping.com/your-uuid
 
 Pings the URL on success (with duration + size in body), appends `/fail` on error. No hook config needed.
 
+### Optional: Prometheus textfile-metric via BACKUP_POST_HOOK
+
+`tools/backup-freshness-write` writes a node-exporter textfile-collector
+metric after a successful backup, so an alert rule like
+`(time() - kedge_backup_last_success) / 3600 > 26` can page on a stale backup:
+
+```bash
+BACKUP_POST_HOOK='tools/backup-freshness-write "$BACKUP_STACK"'
+```
+
+Target directory defaults to `/opt/drayve/deploy/stack/monitoring/node-exporter-textfile`,
+override via `BACKUP_FRESHNESS_DIR`.
+
 ## Hot Backup (Zero Downtime)
 
 By default, `backup.sh` stops the stack during volume export for full consistency. Set `BACKUP_STOP_STACK=false` for zero-downtime backups where the stack keeps running.

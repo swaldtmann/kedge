@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# backup-freshness-write — optional BACKUP_POST_HOOK building block (DRAYVE-W-014)
+#
+# Writes a Prometheus node-exporter textfile-collector metric after a
+# successful backup.sh run, so an alert rule like
+#   (time() - kedge_backup_last_success) / 3600 > 26
+# can page on a stale backup. Wire it via BACKUP_POST_HOOK, e.g.:
+#   BACKUP_POST_HOOK='tools/backup-freshness-write "$BACKUP_STACK"'
+#
+# Usage: backup-freshness-write <repo-label>
+#   <repo-label>  operator-chosen identifier for the "repo" metric label
+#                 (e.g. stack name, host alias) — not a structural kedge value.
+#
+# Environment:
+#   BACKUP_FRESHNESS_DIR  node-exporter textfile-collector directory
+#                         (default: /opt/drayve/deploy/stack/monitoring/node-exporter-textfile)
+set -euo pipefail
+
+DIR="${BACKUP_FRESHNESS_DIR:-/opt/drayve/deploy/stack/monitoring/node-exporter-textfile}"
+REPO="$1"
+
+TMP="$(mktemp "${DIR}/.kedge_backup_${REPO}.XXXXXX")"
+echo "kedge_backup_last_success{repo=\"${REPO}\"} $(date +%s)" >"$TMP"
+chmod 0644 "$TMP"
+mv -f "$TMP" "${DIR}/kedge_backup_${REPO}.prom"
