@@ -23,14 +23,26 @@ KV_PATH="${KV_PATH:-secret/kedge/storage-box-restore-ewh-prod}"
 KEDGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 TMPKEY="$(mktemp)"
-cleanup() { rm -f "$TMPKEY"; }
+TMPROLE="$(mktemp)"
+TMPSECRET="$(mktemp)"
+cleanup() { rm -f "$TMPKEY" "$TMPROLE" "$TMPSECRET"; }
 trap cleanup EXIT
 
+# role_id/secret_id ueber @file statt Argv reinreichen — sonst stehen sie kurz
+# im Klartext in der Prozessliste (ps aux), sichtbar fuer andere Prozesse auf
+# derselben Maschine. Gleiches 0600+Shred-Muster wie beim Private Key selbst.
+# printf statt Redirect: security -w haengt einen Newline an, der roh in der
+# Datei den Wert verfaelschen wuerde (Login schlaegt fehl) — Command-Substitution
+# strippt den trailing Newline, printf '%s' schreibt ihn nicht wieder rein.
 role_id="$(security find-generic-password -s "kedge-restore-approle-role-id" -a "byrd" -w)"
 secret_id="$(security find-generic-password -s "kedge-restore-approle-secret-id" -a "byrd" -w)"
+chmod 600 "$TMPROLE" "$TMPSECRET"
+printf '%s' "$role_id" > "$TMPROLE"
+printf '%s' "$secret_id" > "$TMPSECRET"
+unset role_id secret_id
 
 client_token="$(BAO_ADDR="$BAO_ADDR" bao write -field=client_token auth/approle/login \
-  role_id="$role_id" secret_id="$secret_id")"
+  role_id="@$TMPROLE" secret_id="@$TMPSECRET")"
 
 BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$client_token" bao kv get -field=private_key "$KV_PATH" > "$TMPKEY"
 chmod 600 "$TMPKEY"
