@@ -75,19 +75,54 @@ def _restore_stack_files(backup_root: Path, restore_target: Path) -> None:
             log.ok(f"  Restored: {name}")
 
 
-def _restore_external_mounts(backup_root: Path) -> None:
-    """restore.sh:193-210."""
+def _restore_external_mounts(staging_dir: Path, backup_root: Path, meta: dict) -> None:
+    """restore.sh:200-250. New format (meta.json `bind_mount_paths`, CW-W-258):
+    restic already restored these directly under staging_dir at their
+    original absolute path -- same lookup as _restore_volumes' direct-path
+    branch. Legacy format (pre-CW-W-258 snapshots, backup_root/
+    external-mounts/*.tar.gz) is still unpacked so old snapshots stay
+    restorable."""
+    restored_count = 0
+
+    for orig_path_str in meta.get("bind_mount_paths") or []:
+        matches = sorted(
+            p for p in staging_dir.rglob("*")
+            if p.as_posix().endswith(orig_path_str) and (p.is_dir() or p.is_file())
+        )
+        if not matches:
+            log.warn(f"  Bind mount not found in snapshot: {orig_path_str}")
+            continue
+        restored_count += 1
+        restored_path = matches[0]
+        target = Path(orig_path_str)
+        log.info(f"Restoring external mount: {orig_path_str} [direct]")
+        if restored_path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["rsync", "-a", "--delete", f"{restored_path}/", f"{target}/"], check=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(restored_path, target)
+        log.ok(f"  {orig_path_str} restored [direct]")
+
     ext_dir = backup_root / "external-mounts"
-    if not ext_dir.is_dir():
+    if ext_dir.is_dir():
+        for archive in sorted(ext_dir.glob("*.tar.gz")):
+            restored_count += 1
+            mount_name = archive.name[: -len(".tar.gz")]
+            mount_path = Path("/" + mount_name.replace("_", "/"))
+            log.info(f"Restoring external mount: {mount_path} [legacy tar.gz]")
+            # The archive was built via `tar czf ... -C mount.parent
+            # mount.name` (old collect_stack_files), so it contains one
+            # top-level entry named after mount_path.name -- extracting into
+            # mount_path itself double-nests it (mount_path/mount_path.name/
+            # ...). Extract into the PARENT instead, mirroring how the
+            # archive was built.
+            mount_path.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["tar", "xzf", str(archive), "-C", str(mount_path.parent)], check=True)
+            log.ok(f"  {mount_path} restored")
+
+    if restored_count == 0:
         log.info("No external bind mounts to restore")
-        return
-    for archive in sorted(ext_dir.glob("*.tar.gz")):
-        mount_name = archive.name[: -len(".tar.gz")]
-        mount_path = Path("/" + mount_name.replace("_", "/"))
-        log.info(f"Restoring external mount: {mount_path}")
-        mount_path.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["tar", "xzf", str(archive), "-C", str(mount_path)], check=True)
-        log.ok(f"  {mount_path} restored")
 
 
 def _project_name(restore_target: Path) -> str:
@@ -256,7 +291,7 @@ def cmd_restore(
         _restore_stack_files(backup_root, restore_target)
 
         log.info("--- Phase 3: Restore external bind mounts ---")
-        _restore_external_mounts(backup_root)
+        _restore_external_mounts(staging_dir, backup_root, meta)
 
         log.info("--- Phase 4: Restore Docker volumes ---")
         restored_volumes = _restore_volumes(staging_dir, backup_root, meta, restore_target, verify_only, force_live)

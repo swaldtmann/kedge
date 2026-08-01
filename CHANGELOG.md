@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **External bind mounts backed up as direct restic paths, not tar.gz (CW-W-258).**
+  Both `backup.sh` and the Python port (`collect.py`/`commands.py`) tarred +
+  gzipped every Compose bind mount declared outside `$STACK_DIR` before
+  handing it to restic — unlike Docker volumes, which already got a direct
+  restic path (block-level dedup) when the mountpoint was accessible. gzip
+  defeats restic's content-defined chunking: any change anywhere in the
+  source shifts every downstream compressed byte, so the whole archive
+  re-stored as "new" on every single backup regardless of how little
+  actually changed. Live-measured on `prod-poki`: 18.6G of bind-mounted data
+  (`/var/poki/{db,mirror,logs,models,state}`) produced ~6.1GiB of "Added to
+  the repository" on every daily run for weeks — 16 kept snapshots ≈ 97.6G
+  on the storage box for what should have deduplicated to roughly the live
+  data size. Bind mounts are, by Compose definition, always host-local paths
+  (unlike named volumes, which can sit behind a non-local driver) — there
+  was no dedup-safe fallback case here that justified tar.gz in the first
+  place. Existing pre-fix snapshots stay restorable: `restore.sh`/`restore.py`
+  keep the legacy `external-mounts/*.tar.gz` extraction path alongside the
+  new direct-path lookup (meta.json `bind_mount_paths`), selected per
+  snapshot via which format is actually present.
+- **Legacy tar.gz external-mount restore double-nested directories**
+  (pre-existing, found while adding regression coverage for the fix above).
+  The archive was built via `tar czf ... -C "$(dirname "$mount")"
+  "$(basename "$mount")"`, so it contains one top-level entry named after
+  the mount's own basename — but restore extracted it with `-C "$mount_path"`
+  instead of `-C "$(dirname "$mount_path")"`, landing the content at
+  `$mount_path/$(basename "$mount_path")/...` instead of `$mount_path/...`.
+  No existing test exercised a directory-type external-mount restore, so
+  this shipped unnoticed. Fixed in both `restore.sh` and `restore.py`.
+  Known unrelated gap in the same legacy path, not fixable after the fact:
+  old-format *file* (not directory) external mounts were copied into
+  `external-mounts/` using only their bare basename (no path-reconstructing
+  information), and restore's loop only ever globbed `*.tar.gz` — such
+  mounts were silently never restored by any pre-fix snapshot. The
+  information needed to restore them correctly was already lost at backup
+  time in every snapshot taken before this fix; nothing to reconstruct on
+  the restore side.
+
 ### Added
 - **`tools/backup-freshness-write` (DRAYVE-W-014)** — optional
   `BACKUP_POST_HOOK` building block that writes a

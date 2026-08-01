@@ -199,20 +199,59 @@ cmd_restore() {
 
     # Phase 3: External bind mounts
     info "--- Phase 3: Restore external bind mounts ---"
+    local bind_mount_paths_json bind_mount_count=0
+    bind_mount_paths_json="$(jq -r '.bind_mount_paths // [] | .[]' "$backup_root/meta.json" 2>/dev/null || true)"
+    if [[ -n "$bind_mount_paths_json" ]]; then
+        while IFS= read -r orig_path; do
+            [[ -z "$orig_path" ]] && continue
+            bind_mount_count=$((bind_mount_count + 1))
+            # CW-W-258 fix: restic backed this up directly (no tar.gz), same
+            # as a direct-path Docker volume -- find it under STAGING_DIR at
+            # its original absolute path, same lookup collect_volumes' direct
+            # branch already uses for volumes.
+            local restored_path
+            restored_path="$(find "$STAGING_DIR" -path "*${orig_path}" \( -type d -o -type f \) 2>/dev/null | head -1)"
+            if [[ -z "$restored_path" ]]; then
+                warn "  Bind mount not found in snapshot: $orig_path"
+                continue
+            fi
+            info "Restoring external mount: $orig_path [direct]"
+            if [[ -d "$restored_path" ]]; then
+                mkdir -p "$orig_path"
+                rsync -a --delete "$restored_path/" "$orig_path/"
+            else
+                mkdir -p "$(dirname "$orig_path")"
+                cp "$restored_path" "$orig_path"
+            fi
+            ok "  $orig_path restored [direct]"
+        done <<< "$bind_mount_paths_json"
+    fi
+
+    # Legacy format (pre-CW-W-258 snapshots): tar.gz archives under
+    # backup_root/external-mounts/ -- kept so old snapshots stay restorable.
     if [[ -d "$backup_root/external-mounts" ]]; then
         for archive in "$backup_root/external-mounts/"*.tar.gz; do
             [[ -f "$archive" ]] || continue
+            bind_mount_count=$((bind_mount_count + 1))
             local mount_name
             mount_name="$(basename "$archive" .tar.gz)"
             # Convert encoded path back: _opt_data → /opt/data
             local mount_path
             mount_path="/$(echo "$mount_name" | tr '_' '/')"
-            info "Restoring external mount: $mount_path"
-            mkdir -p "$mount_path"
-            tar xzf "$archive" -C "$mount_path"
+            info "Restoring external mount: $mount_path [legacy tar.gz]"
+            # The archive was built via `tar czf ... -C "$(dirname "$mount")"
+            # "$(basename "$mount")"` (old collect_stack_files), so it
+            # contains one top-level entry named after $(basename
+            # "$mount_path") -- extracting into "$mount_path" itself double-
+            # nests it ($mount_path/$(basename "$mount_path")/...). Extract
+            # into the PARENT instead, mirroring how the archive was built.
+            mkdir -p "$(dirname "$mount_path")"
+            tar xzf "$archive" -C "$(dirname "$mount_path")"
             ok "  $mount_path restored"
         done
-    else
+    fi
+
+    if [[ "$bind_mount_count" -eq 0 ]]; then
         info "No external bind mounts to restore"
     fi
 

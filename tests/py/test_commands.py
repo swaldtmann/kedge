@@ -71,7 +71,7 @@ def test_cmd_backup_happy_path(monkeypatch, tmp_path):
     monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: calls.append("pre_hooks") or 0)
     monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: calls.append("stop") or False)
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: calls.append("collect_volumes") or ["/data/x"])
-    monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: calls.append("collect_stack_files"))
+    monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: calls.append("collect_stack_files") or [])
     monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: calls.append("write_metadata"))
     monkeypatch.setattr(commands.restic, "backup", lambda *a, **kw: calls.append("restic_backup"))
     monkeypatch.setattr(commands, "start_stack", lambda *a, **kw: calls.append("start"))
@@ -120,13 +120,36 @@ def _stub_happy_path(monkeypatch):
     monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: 0)
     monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: False)
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: [])
-    monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: None)
+    monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: [])
     monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: None)
     monkeypatch.setattr(commands.restic, "backup", lambda *a, **kw: "1.2 GiB")
     monkeypatch.setattr(commands, "start_stack", lambda *a, **kw: None)
     monkeypatch.setattr(commands.restic, "print_latest_snapshot", lambda cfg: None)
     monkeypatch.setattr(commands.restic, "latest_snapshot_short_id", lambda cfg: "abc123")
     monkeypatch.setattr(commands, "hostname", lambda: "test-host")
+
+
+def test_cmd_backup_passes_bind_mount_paths_to_restic(monkeypatch, tmp_path):
+    """CW-W-258: collect_stack_files' direct bind-mount paths must reach
+    restic.backup's path list — that's the actual fix (no more tar.gz
+    staging for external mounts, so they only get backed up if they flow
+    through here)."""
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    _stub_happy_path(monkeypatch)
+    monkeypatch.setattr(
+        commands, "collect_stack_files", lambda *a, **kw: ["/var/poki/mirror", "/var/poki/db"]
+    )
+
+    captured = {}
+    monkeypatch.setattr(
+        commands.restic, "backup",
+        lambda cfg, paths, excludes, tags, host: captured.setdefault("paths", paths) or "1.2 GiB",
+    )
+
+    commands.cmd_backup(_cfg(tmp_path))
+
+    assert "/var/poki/mirror" in captured["paths"]
+    assert "/var/poki/db" in captured["paths"]
 
 
 # KEDGE-W-007: SYSTEM_PATHS_EXCLUDE is passed to restic for the whole backup

@@ -81,8 +81,18 @@ def collect_volumes(config: dict, vol_map_dir: Path, exclude_volumes: list[str])
     return backup_paths
 
 
-def collect_stack_files(stack_dir: Path, config: dict, target_dir: Path, exclude_mounts: list[str]) -> None:
-    """backup.sh:563-645."""
+def collect_stack_files(stack_dir: Path, config: dict, target_dir: Path, exclude_mounts: list[str]) -> list[str]:
+    """backup.sh:563-645. Returns the list of external bind-mount host paths
+    for restic to back up directly (block-level dedup) -- same treatment as
+    collect_volumes' direct-path branch. Bind mounts are, by Compose
+    definition, always host-local paths (unlike named volumes, which can sit
+    behind a non-local driver), so there is no dedup-safe fallback case here
+    that would justify tar.gz. Tar-then-gzip defeated restic's
+    content-defined chunking: any change anywhere in the source shifts every
+    downstream compressed byte, so the whole archive re-stored as "new" on
+    every single backup regardless of how little actually changed (CW-W-258:
+    poki's /var/poki/mirror, 18.6G, produced ~6.1GiB of "Added to the
+    repository" on every daily run for weeks)."""
     target_dir.mkdir(parents=True, exist_ok=True)
 
     for name in (*STACK_COMPOSE_FILES, *ENV_FILES):
@@ -117,34 +127,25 @@ def collect_stack_files(stack_dir: Path, config: dict, target_dir: Path, exclude
         check=True,
     )
 
-    if external_mounts:
-        ext_dir = target_dir / "external-mounts"
-        ext_dir.mkdir(parents=True, exist_ok=True)
-        for mount in external_mounts:
-            mount_path = Path(mount)
-            if mount_path.is_socket():
-                log.warn(f"Skipping socket: {mount}")
-                continue
-            if not mount_path.exists():
-                log.warn(f"External bind mount not found: {mount}")
-                continue
-            mount_name = mount.strip("/").replace("/", "_")
-            log.info(f"Backing up external bind mount: {mount}")
-            if mount_path.is_dir():
-                subprocess.run(
-                    ["tar", "czf", str(ext_dir / f"{mount_name}.tar.gz"),
-                     "-C", str(mount_path.parent), mount_path.name],
-                    check=True,
-                )
-            else:
-                shutil.copy2(mount_path, ext_dir / mount_path.name)
+    backup_paths: list[str] = []
+    for mount in external_mounts:
+        mount_path = Path(mount)
+        if mount_path.is_socket():
+            log.warn(f"Skipping socket: {mount}")
+            continue
+        if not mount_path.exists():
+            log.warn(f"External bind mount not found: {mount}")
+            continue
+        log.ok(f"  {mount} [direct]")
+        backup_paths.append(mount)
 
     log.ok("Stack files collected")
+    return backup_paths
 
 
 def write_metadata(
     stack_dir: Path, config: dict, compose_cmd: list[str], target: Path,
-    checksums: dict | None = None,
+    checksums: dict | None = None, bind_mount_paths: list[str] | None = None,
 ) -> None:
     """backup.sh:651-696. `checksums` (KEDGE-W-003 #3) is a Python-only
     addition on top of the shell format — meta.json produced by backup.sh
@@ -190,6 +191,7 @@ def write_metadata(
         "containers": containers,
         "volume_mapping": vol_map,
         "volume_paths": vol_paths,
+        "bind_mount_paths": bind_mount_paths or [],
         "docker_version": docker_version,
         "checksums": checksums or {},
     }

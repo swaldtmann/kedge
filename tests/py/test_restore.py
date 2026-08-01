@@ -75,10 +75,14 @@ def test_restore_stack_files_rsyncs_stack_dir(monkeypatch, tmp_path):
 
 # --- _restore_external_mounts ------------------------------------------------
 
-def test_restore_external_mounts_extracts_each_archive(monkeypatch, tmp_path):
+def test_restore_external_mounts_legacy_tar_extracts_each_archive(monkeypatch, tmp_path):
+    """Pre-CW-W-258 snapshots stored external mounts as tar.gz archives —
+    these must stay restorable even after the fix switches new backups to
+    direct-path (meta.json has no bind_mount_paths for such a snapshot)."""
     import tempfile
     import shutil
 
+    staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
     ext_dir = backup_root / "external-mounts"
     _write(ext_dir / "tmp_kedge-pytest-extmount.tar.gz", "fake tar")
@@ -88,17 +92,71 @@ def test_restore_external_mounts_extracts_each_archive(monkeypatch, tmp_path):
         tar_calls = []
         monkeypatch.setattr(subprocess, "run", lambda cmd, check: tar_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
 
-        restore._restore_external_mounts(backup_root)
+        restore._restore_external_mounts(staging_dir, backup_root, meta={})
 
         assert len(tar_calls) == 1
         assert tar_calls[0][0] == "tar"
         assert tar_calls[0][1] == "xzf"
+        # Pre-existing bug fixed alongside CW-W-258: the archive was built
+        # with the mount's own dirname as -C (tar czf ... -C mount.parent
+        # mount.name), so it must be extracted into the PARENT, not into
+        # mount_path itself -- else the restore double-nests the directory
+        # (mount_path/mount_path.name/... instead of mount_path/...).
+        assert tar_calls[0][-1] == "/tmp"
     finally:
         shutil.rmtree(mount_target, ignore_errors=True)
 
 
-def test_restore_external_mounts_noop_when_no_mounts_dir(tmp_path):
-    restore._restore_external_mounts(tmp_path / "backup_root")  # must not raise
+def test_restore_external_mounts_noop_when_nothing_to_restore(tmp_path):
+    restore._restore_external_mounts(tmp_path / "staging", tmp_path / "backup_root", meta={})  # must not raise
+
+
+def test_restore_external_mounts_direct_path_dir(monkeypatch, tmp_path):
+    """CW-W-258: new-format snapshots list bind_mount_paths in meta.json —
+    restic already restored the directory directly under staging_dir at its
+    original absolute path (same layout as a direct-path volume); it must be
+    rsynced back in place, no tar.gz involved."""
+    staging_dir = tmp_path / "staging"
+    backup_root = tmp_path / "backup_root"
+    orig_path = "/var/poki/mirror"
+    restored = staging_dir / "var" / "poki" / "mirror"
+    _write(restored / "msg1.eml", "hi\n")
+
+    rsync_calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: rsync_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
+
+    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]})
+
+    assert len(rsync_calls) == 1
+    assert rsync_calls[0][:3] == ["rsync", "-a", "--delete"]
+    assert rsync_calls[0][3].startswith(str(restored))
+
+
+def test_restore_external_mounts_direct_path_file(monkeypatch, tmp_path):
+    staging_dir = tmp_path / "staging"
+    backup_root = tmp_path / "backup_root"
+    orig_path = "/opt/poki/config/auto-rules.yml"
+    restored = staging_dir / "opt" / "poki" / "config" / "auto-rules.yml"
+    _write(restored, "rules: []\n")
+
+    copy_calls = []
+    monkeypatch.setattr(restore.shutil, "copy2", lambda src, dst: copy_calls.append((src, dst)))
+    monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
+
+    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]})
+
+    assert len(copy_calls) == 1
+    assert copy_calls[0][0] == restored
+
+
+def test_restore_external_mounts_direct_path_missing_warns(tmp_path):
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    backup_root = tmp_path / "backup_root"
+
+    # must not raise — just warns and skips
+    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": ["/var/poki/mirror"]})
 
 
 # --- _project_name -------------------------------------------------------------

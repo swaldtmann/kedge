@@ -113,8 +113,9 @@ def cmd_backup(cfg: Config) -> None:
         if cfg.sqlite_wal_checkpoint_paths:
             # KEDGE-W-004: SQLite (e.g. prod-poki) has no container image to
             # auto-discover a dump hook for -- its bind-mount already gets
-            # tarred like any other external mount (collect.py), this just
-            # makes the plain .db file in that mount self-consistent first.
+            # backed up directly like any other external mount (collect.py,
+            # CW-W-258), this just makes the plain .db file in that mount
+            # self-consistent first.
             log.info("--- Phase 1b: SQLite WAL checkpoints ---")
             checkpoint_wal_paths(cfg.sqlite_wal_checkpoint_paths)
 
@@ -123,17 +124,20 @@ def cmd_backup(cfg: Config) -> None:
         volume_backup_paths = collect_volumes(config, staging_dir / "volumes", cfg.exclude_volumes)
 
         log.info("--- Phase 3: Stack files ---")
-        collect_stack_files(cfg.stack_dir, config, staging_dir, cfg.exclude_mounts)
+        bind_mount_backup_paths = collect_stack_files(cfg.stack_dir, config, staging_dir, cfg.exclude_mounts)
 
         checksums = {
             "volumes": compute_backup_checksums(config, staging_dir / "volumes", cfg.exclude_volumes),
             "dumps": compute_dump_checksums(staging_dir / "dumps"),
         }
-        write_metadata(cfg.stack_dir, config, prereqs.compose_cmd, staging_dir, checksums=checksums)
+        write_metadata(
+            cfg.stack_dir, config, prereqs.compose_cmd, staging_dir,
+            checksums=checksums, bind_mount_paths=bind_mount_backup_paths,
+        )
 
         log.info("--- Phase 5: Restic backup ---")
         hostname_str = hostname()
-        backup_paths: list[Path | str] = [staging_dir, *volume_backup_paths]
+        backup_paths: list[Path | str] = [staging_dir, *volume_backup_paths, *bind_mount_backup_paths]
         for sp in cfg.system_paths:
             if Path(sp).exists():
                 backup_paths.append(sp)

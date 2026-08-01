@@ -509,6 +509,9 @@ run_pre_hooks() {
 # Collected volume paths for restic (populated by collect_volumes)
 VOLUME_BACKUP_PATHS=()
 
+# Collected external bind-mount paths for restic (populated by collect_stack_files)
+BIND_MOUNT_BACKUP_PATHS=()
+
 collect_volumes() {
     local config="$1"
     local vol_map_dir="$2"
@@ -567,6 +570,7 @@ collect_stack_files() {
     local config="$1"
     local target_dir="$2"
     mkdir -p "$target_dir"
+    BIND_MOUNT_BACKUP_PATHS=()
 
     # Compose file(s)
     for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml \
@@ -584,7 +588,7 @@ collect_stack_files() {
     done
 
     # Bind mounts within stack dir: copy entire stack dir (excluding volumes data)
-    # Bind mounts outside stack dir: copy separately
+    # Bind mounts outside stack dir: collected below as direct restic paths
     local external_mounts=()
     while IFS= read -r mount_src; do
         if [[ -z "$mount_src" ]]; then continue; fi
@@ -623,26 +627,26 @@ collect_stack_files() {
         --exclude='*.pyc' \
         "$STACK_DIR/./" "$target_dir/stack-dir/"
 
-    # External bind mounts
-    if [[ ${#external_mounts[@]} -gt 0 ]]; then
-        mkdir -p "$target_dir/external-mounts"
-        for mount in "${external_mounts[@]}"; do
-            if [[ -S "$mount" ]]; then
-                warn "Skipping socket: $mount"
-            elif [[ -e "$mount" ]]; then
-                local mount_name
-                mount_name="$(echo "$mount" | tr '/' '_' | sed 's/^_//')"
-                info "Backing up external bind mount: $mount"
-                if [[ -d "$mount" ]]; then
-                    tar czf "$target_dir/external-mounts/${mount_name}.tar.gz" -C "$(dirname "$mount")" "$(basename "$mount")"
-                else
-                    cp "$mount" "$target_dir/external-mounts/"
-                fi
-            else
-                warn "External bind mount not found: $mount"
-            fi
-        done
-    fi
+    # External bind mounts: direct restic path (block-level dedup), same
+    # treatment as collect_volumes' direct-path branch. Bind mounts are, by
+    # Compose definition, always host-local paths (unlike named volumes,
+    # which can sit behind a non-local driver) -- there is no dedup-safe
+    # fallback case here that would justify tar.gz. Tar-then-gzip defeated
+    # restic's content-defined chunking: any change anywhere in the source
+    # shifts every downstream compressed byte, so the whole archive re-stored
+    # as "new" on every single backup regardless of how little actually
+    # changed (CW-W-258: poki's /var/poki/mirror, 18.6G, produced ~6.1GiB of
+    # "Added to the repository" on every daily run for weeks).
+    for mount in "${external_mounts[@]}"; do
+        if [[ -S "$mount" ]]; then
+            warn "Skipping socket: $mount"
+        elif [[ -e "$mount" ]]; then
+            info "  $mount [direct]"
+            BIND_MOUNT_BACKUP_PATHS+=("$mount")
+        else
+            warn "External bind mount not found: $mount"
+        fi
+    done
 
     ok "Stack files collected"
 }
@@ -680,6 +684,11 @@ write_metadata() {
         fi
     done < <(discover_volumes "$config")
 
+    local bind_mount_paths="[]"
+    for bp in "${BIND_MOUNT_BACKUP_PATHS[@]}"; do
+        bind_mount_paths="$(echo "$bind_mount_paths" | jq --arg p "$bp" '. + [$p]')"
+    done
+
     cat > "$target/meta.json" <<METAEOF
 {
     "format_version": "$BACKUP_FORMAT_VERSION",
@@ -691,6 +700,7 @@ write_metadata() {
     "containers": $containers,
     "volume_mapping": $vol_map,
     "volume_paths": $vol_paths,
+    "bind_mount_paths": $bind_mount_paths,
     "docker_version": "$(docker --version 2>/dev/null | head -1)"
 }
 METAEOF
@@ -919,10 +929,14 @@ cmd_backup() {
     local hostname_str
     hostname_str="$(hostname -f 2>/dev/null || hostname)"
 
-    # Build backup path list: staging dir + direct volume paths + system paths
+    # Build backup path list: staging dir + direct volume paths + direct
+    # bind-mount paths + system paths
     local backup_paths=("$STAGING_DIR")
     for vp in "${VOLUME_BACKUP_PATHS[@]}"; do
         backup_paths+=("$vp")
+    done
+    for bp in "${BIND_MOUNT_BACKUP_PATHS[@]}"; do
+        backup_paths+=("$bp")
     done
     for sp in $SYSTEM_PATHS; do
         if [[ -e "$sp" ]]; then

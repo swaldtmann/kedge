@@ -87,7 +87,12 @@ def test_collect_stack_files_copies_compose_and_env(monkeypatch, tmp_path):
     assert (target_dir / ".env").is_file()
 
 
-def test_collect_stack_files_external_mount_tarred(monkeypatch, tmp_path):
+def test_collect_stack_files_external_mount_direct_path(monkeypatch, tmp_path):
+    """CW-W-258: external bind mounts must go to restic as a direct path
+    (block-level dedup), never through tar.gz — tar-then-gzip defeats
+    restic's content-defined chunking (any change shifts every downstream
+    compressed byte), so the whole mount re-stores as "new" on every single
+    backup regardless of how little actually changed."""
     stack_dir = tmp_path / "stack"
     stack_dir.mkdir()
     external = tmp_path / "external-data"
@@ -103,10 +108,64 @@ def test_collect_stack_files_external_mount_tarred(monkeypatch, tmp_path):
         ("tar",): lambda cmd: tar_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
     }))
 
-    collect_stack_files(stack_dir, config, target_dir, exclude_mounts=[])
+    paths = collect_stack_files(stack_dir, config, target_dir, exclude_mounts=[])
 
-    assert len(tar_calls) == 1
-    assert (target_dir / "external-mounts").is_dir()
+    assert tar_calls == []
+    assert not (target_dir / "external-mounts").exists()
+    assert paths == [str(external)]
+
+
+def test_collect_stack_files_external_mount_file_direct_path(monkeypatch, tmp_path):
+    """A bind-mounted single file (not a directory) also goes direct —
+    restic backs up individual files fine, no staging copy needed."""
+    stack_dir = tmp_path / "stack"
+    stack_dir.mkdir()
+    external_file = tmp_path / "external.conf"
+    external_file.write_text("key=value\n")
+
+    config = {"services": {"app": {"volumes": [{"type": "bind", "source": str(external_file), "target": "/x"}]}}}
+    target_dir = tmp_path / "staging"
+
+    monkeypatch.setattr(subprocess, "run", _dispatch({
+        ("rsync",): lambda cmd: subprocess.CompletedProcess(cmd, 0),
+    }))
+
+    paths = collect_stack_files(stack_dir, config, target_dir, exclude_mounts=[])
+    assert paths == [str(external_file)]
+
+
+def test_collect_stack_files_external_mount_socket_skipped(monkeypatch, tmp_path):
+    stack_dir = tmp_path / "stack"
+    stack_dir.mkdir()
+    sock_path = tmp_path / "app.sock"
+    sock_path.touch()  # is_socket() mocked below -- real AF_UNIX bind hits macOS's ~104-char path limit
+
+    config = {"services": {"app": {"volumes": [{"type": "bind", "source": str(sock_path), "target": "/x"}]}}}
+    target_dir = tmp_path / "staging"
+
+    monkeypatch.setattr(subprocess, "run", _dispatch({
+        ("rsync",): lambda cmd: subprocess.CompletedProcess(cmd, 0),
+    }))
+    monkeypatch.setattr("kedge.collect.Path.is_socket", lambda self: self == sock_path)
+
+    paths = collect_stack_files(stack_dir, config, target_dir, exclude_mounts=[])
+    assert paths == []
+
+
+def test_collect_stack_files_external_mount_not_found_skipped(monkeypatch, tmp_path):
+    stack_dir = tmp_path / "stack"
+    stack_dir.mkdir()
+    missing = tmp_path / "does-not-exist"
+
+    config = {"services": {"app": {"volumes": [{"type": "bind", "source": str(missing), "target": "/x"}]}}}
+    target_dir = tmp_path / "staging"
+
+    monkeypatch.setattr(subprocess, "run", _dispatch({
+        ("rsync",): lambda cmd: subprocess.CompletedProcess(cmd, 0),
+    }))
+
+    paths = collect_stack_files(stack_dir, config, target_dir, exclude_mounts=[])
+    assert paths == []
 
 
 def test_collect_stack_files_excluded_mount_skipped(monkeypatch, tmp_path):
@@ -146,3 +205,22 @@ def test_write_metadata(monkeypatch, tmp_path):
     assert meta["volume_mapping"]["webdata"] == "mystack_webdata"
     assert meta["volume_paths"]["webdata"] == "/var/lib/docker/volumes/x/_data"
     assert meta["docker_version"] == "Docker version 27.0.0"
+    assert meta["bind_mount_paths"] == []
+
+
+def test_write_metadata_bind_mount_paths(monkeypatch, tmp_path):
+    stack_dir = tmp_path / "stack"
+    stack_dir.mkdir()
+    target = tmp_path / "staging"
+    target.mkdir()
+
+    monkeypatch.setattr("kedge.collect.resolve_volume_name", lambda pattern: "")
+    monkeypatch.setattr(subprocess, "run", _dispatch({}))
+
+    write_metadata(
+        stack_dir, {"volumes": {}, "services": {}}, ["docker", "compose"], target,
+        bind_mount_paths=["/var/poki/mirror", "/var/poki/db"],
+    )
+
+    meta = json.loads((target / "meta.json").read_text())
+    assert meta["bind_mount_paths"] == ["/var/poki/mirror", "/var/poki/db"]
