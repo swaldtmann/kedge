@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -74,41 +75,45 @@ def test_restore_stack_files_rsyncs_stack_dir(monkeypatch, tmp_path):
 
 
 # --- _restore_external_mounts ------------------------------------------------
+#
+# verify_only=False, force_live=False + live_sources stubbed to empty in all
+# tests below that aren't specifically about the live-mount guard -- that's
+# the "normal disaster-recovery onto a fresh host" case the guard already
+# lets through unconditionally, so it doesn't interfere with what these
+# tests actually check.
+
+def _stub_no_live_mounts(monkeypatch):
+    monkeypatch.setattr(restore, "_bind_mount_live_sources", lambda: set())
+
 
 def test_restore_external_mounts_legacy_tar_extracts_each_archive(monkeypatch, tmp_path):
     """Pre-CW-W-258 snapshots stored external mounts as tar.gz archives —
     these must stay restorable even after the fix switches new backups to
     direct-path (meta.json has no bind_mount_paths for such a snapshot)."""
-    import tempfile
-    import shutil
-
+    _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
     ext_dir = backup_root / "external-mounts"
-    _write(ext_dir / "tmp_kedge-pytest-extmount.tar.gz", "fake tar")
+    mount_dir = tmp_path / "kedge-pytest-extmount"
+    mount_dir.mkdir()
+    tar_path = ext_dir / "tmp_kedge-pytest-extmount.tar.gz"
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["tar", "czf", str(tar_path), "-C", str(mount_dir.parent), mount_dir.name], check=True)
 
-    mount_target = tempfile.mkdtemp(prefix="kedge-pytest-extmount")
-    try:
-        tar_calls = []
-        monkeypatch.setattr(subprocess, "run", lambda cmd, check: tar_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    restore._restore_external_mounts(staging_dir, backup_root, meta={}, verify_only=False, force_live=False)
 
-        restore._restore_external_mounts(staging_dir, backup_root, meta={})
-
-        assert len(tar_calls) == 1
-        assert tar_calls[0][0] == "tar"
-        assert tar_calls[0][1] == "xzf"
-        # Pre-existing bug fixed alongside CW-W-258: the archive was built
-        # with the mount's own dirname as -C (tar czf ... -C mount.parent
-        # mount.name), so it must be extracted into the PARENT, not into
-        # mount_path itself -- else the restore double-nests the directory
-        # (mount_path/mount_path.name/... instead of mount_path/...).
-        assert tar_calls[0][-1] == "/tmp"
-    finally:
-        shutil.rmtree(mount_target, ignore_errors=True)
+    # Pre-existing bug fixed alongside CW-W-258: the archive was built with
+    # the mount's own dirname as -C (tar czf ... -C mount.parent mount.name),
+    # extracting straight back to that real absolute path -- no double-nesting
+    # (mount_dir/mount_dir.name/... instead of mount_dir/...).
+    assert mount_dir.is_dir()
+    assert not (mount_dir / mount_dir.name).exists()
 
 
 def test_restore_external_mounts_noop_when_nothing_to_restore(tmp_path):
-    restore._restore_external_mounts(tmp_path / "staging", tmp_path / "backup_root", meta={})  # must not raise
+    restore._restore_external_mounts(
+        tmp_path / "staging", tmp_path / "backup_root", meta={}, verify_only=False, force_live=False,
+    )  # must not raise -- and must not even try to reach docker (nothing to restore)
 
 
 def test_restore_external_mounts_direct_path_dir(monkeypatch, tmp_path):
@@ -116,6 +121,7 @@ def test_restore_external_mounts_direct_path_dir(monkeypatch, tmp_path):
     restic already restored the directory directly under staging_dir at its
     original absolute path (same layout as a direct-path volume); it must be
     rsynced back in place, no tar.gz involved."""
+    _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
     orig_path = "/var/poki/mirror"
@@ -126,14 +132,18 @@ def test_restore_external_mounts_direct_path_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda cmd, check: rsync_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
     monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
 
-    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]})
+    restore._restore_external_mounts(
+        staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=False, force_live=False,
+    )
 
     assert len(rsync_calls) == 1
     assert rsync_calls[0][:3] == ["rsync", "-a", "--delete"]
     assert rsync_calls[0][3].startswith(str(restored))
+    assert rsync_calls[0][4] == f"{orig_path}/"
 
 
 def test_restore_external_mounts_direct_path_file(monkeypatch, tmp_path):
+    _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
     orig_path = "/opt/poki/config/auto-rules.yml"
@@ -144,19 +154,130 @@ def test_restore_external_mounts_direct_path_file(monkeypatch, tmp_path):
     monkeypatch.setattr(restore.shutil, "copy2", lambda src, dst: copy_calls.append((src, dst)))
     monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
 
-    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]})
+    restore._restore_external_mounts(
+        staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=False, force_live=False,
+    )
 
     assert len(copy_calls) == 1
     assert copy_calls[0][0] == restored
+    assert copy_calls[0][1] == Path(orig_path)
 
 
-def test_restore_external_mounts_direct_path_missing_warns(tmp_path):
+def test_restore_external_mounts_direct_path_missing_warns(monkeypatch, tmp_path):
+    _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     staging_dir.mkdir()
     backup_root = tmp_path / "backup_root"
 
     # must not raise — just warns and skips
-    restore._restore_external_mounts(staging_dir, backup_root, meta={"bind_mount_paths": ["/var/poki/mirror"]})
+    restore._restore_external_mounts(
+        staging_dir, backup_root, meta={"bind_mount_paths": ["/var/poki/mirror"]},
+        verify_only=False, force_live=False,
+    )
+
+
+# --- _bind_mount_live_sources -------------------------------------------------
+
+def test_bind_mount_live_sources_collects_bind_type_only(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="c1\nc2\n")
+        if cmd[:2] == ["docker", "inspect"] and cmd[2] == "c1":
+            mounts = json.dumps([
+                {"Type": "bind", "Source": "/var/poki/mirror"},
+                {"Type": "volume", "Source": "/var/lib/docker/volumes/x/_data"},
+            ])
+            return subprocess.CompletedProcess(cmd, 0, stdout=mounts)
+        if cmd[:2] == ["docker", "inspect"] and cmd[2] == "c2":
+            mounts = json.dumps([{"Type": "bind", "Source": "/opt/poki/config"}])
+            return subprocess.CompletedProcess(cmd, 0, stdout=mounts)
+        return subprocess.CompletedProcess(cmd, 1, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    sources = restore._bind_mount_live_sources()
+    assert sources == {"/var/poki/mirror", "/opt/poki/config"}
+
+
+def test_bind_mount_live_sources_no_running_containers(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=""),
+    )
+    assert restore._bind_mount_live_sources() == set()
+
+
+def test_bind_mount_live_sources_inspect_failure_skipped(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="c1\n")
+        return subprocess.CompletedProcess(cmd, 1, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert restore._bind_mount_live_sources() == set()
+
+
+# --- _restore_external_mounts: CW-W-243-style live-mount guard ---------------
+
+def test_restore_external_mounts_verify_never_touches_real_path(monkeypatch, tmp_path):
+    """--verify must isolate under a `_restoretest`-suffixed sibling, even
+    when live_sources would otherwise flag the path as live -- verify_only
+    is checked first and never even calls out to docker (see
+    test_restore_external_mounts_noop_when_nothing_to_restore's sibling
+    concern: this must not need _bind_mount_live_sources stubbed at all)."""
+    staging_dir = tmp_path / "staging"
+    backup_root = tmp_path / "backup_root"
+    orig_path = "/var/poki/mirror"
+    restored = staging_dir / "var" / "poki" / "mirror"
+    _write(restored / "msg1.eml", "hi\n")
+
+    rsync_calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: rsync_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
+
+    def fail_if_called():
+        raise AssertionError("--verify must not consult _bind_mount_live_sources at all")
+
+    monkeypatch.setattr(restore, "_bind_mount_live_sources", fail_if_called)
+
+    restore._restore_external_mounts(
+        staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=True, force_live=False,
+    )
+
+    assert rsync_calls[0][4] == "/var/poki/mirror_restoretest/"
+
+
+def test_restore_external_mounts_refuses_live_mount_without_force(monkeypatch, tmp_path):
+    staging_dir = tmp_path / "staging"
+    backup_root = tmp_path / "backup_root"
+    orig_path = "/var/poki/mirror"
+    _write(staging_dir / "var" / "poki" / "mirror" / "msg1.eml", "hi\n")
+
+    monkeypatch.setattr(restore, "_bind_mount_live_sources", lambda: {orig_path})
+
+    with pytest.raises(KedgeError, match="currently mounted by a running container"):
+        restore._restore_external_mounts(
+            staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=False, force_live=False,
+        )
+
+
+def test_restore_external_mounts_force_live_overwrites(monkeypatch, tmp_path):
+    staging_dir = tmp_path / "staging"
+    backup_root = tmp_path / "backup_root"
+    orig_path = "/var/poki/mirror"
+    restored = staging_dir / "var" / "poki" / "mirror"
+    _write(restored / "msg1.eml", "hi\n")
+
+    monkeypatch.setattr(restore, "_bind_mount_live_sources", lambda: {orig_path})
+    rsync_calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: rsync_calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    monkeypatch.setattr(restore.Path, "mkdir", lambda self, parents=False, exist_ok=False: None)
+
+    restore._restore_external_mounts(
+        staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=False, force_live=True,
+    )
+
+    assert rsync_calls[0][4] == "/var/poki/mirror/"
 
 
 # --- _project_name -------------------------------------------------------------

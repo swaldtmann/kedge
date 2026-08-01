@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Live-bind-mount restore guard for external mounts (CW-W-258 follow-up),
+  mirroring CW-W-243's Docker-volume guard.** Restoring an external bind
+  mount (now a direct restic path, see below) had no protection against
+  overwriting a path currently in live use — unlike named volumes, bind
+  mounts have no separate "name" to isolate a `--verify` restore behind, so
+  a naive port of the volume guard wasn't enough. `restore.sh`/`restore.py`
+  now check every RUNNING container's bind-mount sources directly (docker's
+  native `--filter volume=<name>` only resolves named volumes) before
+  writing: `--verify` always restores under a `_restoretest`-suffixed
+  sibling path instead of the real one; a genuine restore refuses to
+  overwrite a path currently mounted by a running container unless
+  `--force-live` is passed, exactly like the existing volume guard's
+  messaging and semantics. Applies to both the new direct-path format and
+  the legacy tar.gz format.
+
 ### Fixed
 - **External bind mounts backed up as direct restic paths, not tar.gz (CW-W-258).**
   Both `backup.sh` and the Python port (`collect.py`/`commands.py`) tarred +

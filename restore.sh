@@ -201,6 +201,23 @@ cmd_restore() {
     info "--- Phase 3: Restore external bind mounts ---"
     local bind_mount_paths_json bind_mount_count=0
     bind_mount_paths_json="$(jq -r '.bind_mount_paths // [] | .[]' "$backup_root/meta.json" 2>/dev/null || true)"
+
+    # CW-W-243-style live-mount guard, applied to bind mounts: they have no
+    # volume-name indirection to isolate behind (the restore target IS the
+    # literal original absolute path), so this checks every RUNNING
+    # container's bind-mount Sources directly -- docker's native `--filter
+    # volume=<name>` only resolves named volumes. Computed once, only if
+    # there's actually something to restore AND we'll actually consult it
+    # (--verify always takes the isolated-target branch below and never
+    # looks at this, so skip the docker calls entirely in that case).
+    local live_bind_mounts=""
+    if ! $verify_only && [[ -n "$bind_mount_paths_json" || -d "$backup_root/external-mounts" ]]; then
+        while IFS= read -r cid; do
+            [[ -z "$cid" ]] && continue
+            live_bind_mounts+="$(docker inspect "$cid" --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\n"}}{{end}}{{end}}' 2>/dev/null)"$'\n'
+        done < <(docker ps -q 2>/dev/null)
+    fi
+
     if [[ -n "$bind_mount_paths_json" ]]; then
         while IFS= read -r orig_path; do
             [[ -z "$orig_path" ]] && continue
@@ -215,15 +232,28 @@ cmd_restore() {
                 warn "  Bind mount not found in snapshot: $orig_path"
                 continue
             fi
-            info "Restoring external mount: $orig_path [direct]"
-            if [[ -d "$restored_path" ]]; then
-                mkdir -p "$orig_path"
-                rsync -a --delete "$restored_path/" "$orig_path/"
-            else
-                mkdir -p "$(dirname "$orig_path")"
-                cp "$restored_path" "$orig_path"
+
+            local restore_target_path="$orig_path"
+            if $verify_only; then
+                # --verify must never write into the real, potentially-live
+                # path -- always restore under an isolated sibling instead.
+                restore_target_path="${orig_path%/}_restoretest"
+            elif echo "$live_bind_mounts" | grep -qxF "$orig_path"; then
+                if ! $force_live; then
+                    die "Bind mount '$orig_path' is currently mounted by a running container — this restore target looks like the live backup source host. Refusing to overwrite live data. Re-run with --force-live if this is really intended."
+                fi
+                warn "  --force-live set: overwriting '$orig_path' while mounted by a running container"
             fi
-            ok "  $orig_path restored [direct]"
+
+            info "Restoring external mount: $orig_path -> $restore_target_path [direct]"
+            if [[ -d "$restored_path" ]]; then
+                mkdir -p "$restore_target_path"
+                rsync -a --delete "$restored_path/" "$restore_target_path/"
+            else
+                mkdir -p "$(dirname "$restore_target_path")"
+                cp "$restored_path" "$restore_target_path"
+            fi
+            ok "  $restore_target_path restored [direct]"
         done <<< "$bind_mount_paths_json"
     fi
 
@@ -236,18 +266,33 @@ cmd_restore() {
             local mount_name
             mount_name="$(basename "$archive" .tar.gz)"
             # Convert encoded path back: _opt_data → /opt/data
-            local mount_path
-            mount_path="/$(echo "$mount_name" | tr '_' '/')"
-            info "Restoring external mount: $mount_path [legacy tar.gz]"
-            # The archive was built via `tar czf ... -C "$(dirname "$mount")"
-            # "$(basename "$mount")"` (old collect_stack_files), so it
-            # contains one top-level entry named after $(basename
-            # "$mount_path") -- extracting into "$mount_path" itself double-
-            # nests it ($mount_path/$(basename "$mount_path")/...). Extract
-            # into the PARENT instead, mirroring how the archive was built.
-            mkdir -p "$(dirname "$mount_path")"
-            tar xzf "$archive" -C "$(dirname "$mount_path")"
-            ok "  $mount_path restored"
+            local orig_path
+            orig_path="/$(echo "$mount_name" | tr '_' '/')"
+
+            local restore_target_path="$orig_path"
+            if $verify_only; then
+                restore_target_path="${orig_path%/}_restoretest"
+            elif echo "$live_bind_mounts" | grep -qxF "$orig_path"; then
+                if ! $force_live; then
+                    die "Bind mount '$orig_path' is currently mounted by a running container — this restore target looks like the live backup source host. Refusing to overwrite live data. Re-run with --force-live if this is really intended."
+                fi
+                warn "  --force-live set: overwriting '$orig_path' while mounted by a running container"
+            fi
+
+            info "Restoring external mount: $orig_path -> $restore_target_path [legacy tar.gz]"
+            # The archive's internal top-level entry is named after
+            # basename(orig_path) (tar czf ... -C dirname basename, old
+            # collect_stack_files) -- extract to a scratch dir first so a
+            # --verify/_restoretest target (different basename) still lands
+            # correctly, then move the extracted tree into place.
+            local scratch
+            scratch="$(mktemp -d "${TMPDIR:-/tmp}/kedge-restore-extmount.XXXXXX")"
+            tar xzf "$archive" -C "$scratch"
+            mkdir -p "$(dirname "$restore_target_path")"
+            rm -rf "$restore_target_path"
+            mv "$scratch/$(basename "$orig_path")" "$restore_target_path"
+            rmdir "$scratch" 2>/dev/null || true
+            ok "  $restore_target_path restored [legacy tar.gz]"
         done
     fi
 

@@ -75,16 +75,77 @@ def _restore_stack_files(backup_root: Path, restore_target: Path) -> None:
             log.ok(f"  Restored: {name}")
 
 
-def _restore_external_mounts(staging_dir: Path, backup_root: Path, meta: dict) -> None:
-    """restore.sh:200-250. New format (meta.json `bind_mount_paths`, CW-W-258):
+def _bind_mount_live_sources() -> set[str]:
+    """CW-W-258 live-bind-mount guard: absolute host paths currently bind-
+    mounted (Type "bind") into any RUNNING container. Docker's native
+    `docker ps --filter volume=<name>` only resolves named volumes; bind
+    mounts have no equivalent filter, so this inspects every running
+    container's Mounts list directly."""
+    ps = subprocess.run(["docker", "ps", "-q"], capture_output=True, text=True, check=False)
+    sources: set[str] = set()
+    for cid in ps.stdout.split():
+        result = subprocess.run(
+            ["docker", "inspect", cid, "--format", "{{json .Mounts}}"],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            continue
+        try:
+            mounts = json.loads(result.stdout)
+        except ValueError:
+            continue
+        for m in mounts:
+            if m.get("Type") == "bind" and m.get("Source"):
+                sources.add(m["Source"])
+    return sources
+
+
+def _resolve_bind_mount_target(
+    orig_path: str, verify_only: bool, force_live: bool, live_sources: set[str],
+) -> Path:
+    """CW-W-243-style guard, applied to bind mounts -- which have no
+    volume-name indirection to isolate behind, so the restore target IS the
+    literal original absolute path. --verify always restores under a
+    `_restoretest`-suffixed sibling path instead of the real one."""
+    if verify_only:
+        return Path(f"{orig_path.rstrip('/')}_restoretest")
+    if orig_path in live_sources:
+        if not force_live:
+            raise KedgeError(
+                f"Bind mount '{orig_path}' is currently mounted by a running "
+                f"container — this restore target looks like the live backup "
+                f"source host. Refusing to overwrite live data. Re-run with "
+                f"--force-live if this is really intended."
+            )
+        log.warn(f"  --force-live set: overwriting '{orig_path}' while mounted by a running container")
+    return Path(orig_path)
+
+
+def _restore_external_mounts(
+    staging_dir: Path, backup_root: Path, meta: dict, verify_only: bool, force_live: bool,
+) -> None:
+    """restore.sh:200-270. New format (meta.json `bind_mount_paths`, CW-W-258):
     restic already restored these directly under staging_dir at their
     original absolute path -- same lookup as _restore_volumes' direct-path
     branch. Legacy format (pre-CW-W-258 snapshots, backup_root/
     external-mounts/*.tar.gz) is still unpacked so old snapshots stay
-    restorable."""
-    restored_count = 0
+    restorable. Live-mount guard mirrors CW-W-243's volume guard: --verify
+    never writes into the real path; a genuine restore refuses to overwrite
+    a path currently mounted by a running container unless --force-live."""
+    bind_mount_paths: list[str] = meta.get("bind_mount_paths") or []
+    ext_dir = backup_root / "external-mounts"
+    legacy_archives = sorted(ext_dir.glob("*.tar.gz")) if ext_dir.is_dir() else []
 
-    for orig_path_str in meta.get("bind_mount_paths") or []:
+    if not bind_mount_paths and not legacy_archives:
+        log.info("No external bind mounts to restore")
+        return
+
+    # --verify always takes the isolated-target branch in
+    # _resolve_bind_mount_target and never looks at live_sources -- skip the
+    # docker calls entirely in that case.
+    live_sources: set[str] = _bind_mount_live_sources() if not verify_only else set()
+
+    for orig_path_str in bind_mount_paths:
         matches = sorted(
             p for p in staging_dir.rglob("*")
             if p.as_posix().endswith(orig_path_str) and (p.is_dir() or p.is_file())
@@ -92,37 +153,35 @@ def _restore_external_mounts(staging_dir: Path, backup_root: Path, meta: dict) -
         if not matches:
             log.warn(f"  Bind mount not found in snapshot: {orig_path_str}")
             continue
-        restored_count += 1
         restored_path = matches[0]
-        target = Path(orig_path_str)
-        log.info(f"Restoring external mount: {orig_path_str} [direct]")
+        target = _resolve_bind_mount_target(orig_path_str, verify_only, force_live, live_sources)
+        log.info(f"Restoring external mount: {orig_path_str} -> {target} [direct]")
         if restored_path.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             subprocess.run(["rsync", "-a", "--delete", f"{restored_path}/", f"{target}/"], check=True)
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(restored_path, target)
-        log.ok(f"  {orig_path_str} restored [direct]")
+        log.ok(f"  {target} restored [direct]")
 
-    ext_dir = backup_root / "external-mounts"
-    if ext_dir.is_dir():
-        for archive in sorted(ext_dir.glob("*.tar.gz")):
-            restored_count += 1
-            mount_name = archive.name[: -len(".tar.gz")]
-            mount_path = Path("/" + mount_name.replace("_", "/"))
-            log.info(f"Restoring external mount: {mount_path} [legacy tar.gz]")
-            # The archive was built via `tar czf ... -C mount.parent
-            # mount.name` (old collect_stack_files), so it contains one
-            # top-level entry named after mount_path.name -- extracting into
-            # mount_path itself double-nests it (mount_path/mount_path.name/
-            # ...). Extract into the PARENT instead, mirroring how the
-            # archive was built.
-            mount_path.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["tar", "xzf", str(archive), "-C", str(mount_path.parent)], check=True)
-            log.ok(f"  {mount_path} restored")
-
-    if restored_count == 0:
-        log.info("No external bind mounts to restore")
+    for archive in legacy_archives:
+        mount_name = archive.name[: -len(".tar.gz")]
+        orig_path_str = "/" + mount_name.replace("_", "/")
+        target = _resolve_bind_mount_target(orig_path_str, verify_only, force_live, live_sources)
+        log.info(f"Restoring external mount: {orig_path_str} -> {target} [legacy tar.gz]")
+        # The archive's internal top-level entry is named after
+        # Path(orig_path_str).name (tar czf ... -C mount.parent mount.name,
+        # old collect_stack_files) -- extract to a scratch dir first so a
+        # --verify/_restoretest target (different basename) still lands
+        # correctly, then move the extracted tree into place.
+        with tempfile.TemporaryDirectory(prefix="kedge-restore-extmount.") as scratch:
+            subprocess.run(["tar", "xzf", str(archive), "-C", scratch], check=True)
+            extracted = Path(scratch) / Path(orig_path_str).name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                shutil.rmtree(target) if target.is_dir() else target.unlink()
+            shutil.move(str(extracted), str(target))
+        log.ok(f"  {target} restored [legacy tar.gz]")
 
 
 def _project_name(restore_target: Path) -> str:
@@ -291,7 +350,7 @@ def cmd_restore(
         _restore_stack_files(backup_root, restore_target)
 
         log.info("--- Phase 3: Restore external bind mounts ---")
-        _restore_external_mounts(staging_dir, backup_root, meta)
+        _restore_external_mounts(staging_dir, backup_root, meta, verify_only, force_live)
 
         log.info("--- Phase 4: Restore Docker volumes ---")
         restored_volumes = _restore_volumes(staging_dir, backup_root, meta, restore_target, verify_only, force_live)
