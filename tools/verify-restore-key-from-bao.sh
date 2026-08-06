@@ -13,8 +13,13 @@
 # (secret/kedge/storage-box-restore-ewh-prod).
 #
 # Usage: ./verify-restore-key-from-bao.sh [weitere verify.sh-Argumente/Env]
-#   Beispiel: RESTIC_REPOSITORY=sftp:u564740-sub1@u564740-sub1.your-storagebox.de:/ \
-#             ./verify-restore-key-from-bao.sh
+#   Beispiel: RESTIC_REPOSITORY=sftp:u564740-sub1@u564740-sub1.your-storagebox.de:. \
+#             RESTIC_NO_LOCK=1 ./verify-restore-key-from-bao.sh
+#   Repo-Pfad MUSS die relative Form (":.") haben — der Subaccount ist auf
+#   ewh-prod gechrootet und Hetzners sftp-Server loest ":/" nicht auf den
+#   Chroot-Root auf (Lstat /config: file does not exist, KEDGE-W-013 Bug 2).
+#   RESTIC_NO_LOCK=1, weil der Subaccount readonly ist — restic will sonst
+#   ein Lock-File schreiben und scheitert schon beim Lesen.
 
 set -euo pipefail
 
@@ -41,8 +46,12 @@ printf '%s' "$role_id" > "$TMPROLE"
 printf '%s' "$secret_id" > "$TMPSECRET"
 unset role_id secret_id
 
-client_token="$(BAO_ADDR="$BAO_ADDR" bao write -field=client_token auth/approle/login \
-  role_id="@$TMPROLE" secret_id="@$TMPSECRET")"
+# -format=json + .auth-Extraktion statt -field=client_token: bei Login-Endpoints
+# liegt das Token unter .auth.*, nicht .data.* — `-field` sucht nur in .data und
+# bricht mit 'Field "client_token" not present in secret' ab (KEDGE-W-013 Bug 1).
+client_token="$(BAO_ADDR="$BAO_ADDR" bao write -format=json auth/approle/login \
+  role_id="@$TMPROLE" secret_id="@$TMPSECRET" \
+  | python3 -c 'import sys, json; print(json.load(sys.stdin)["auth"]["client_token"])')"
 
 BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$client_token" bao kv get -field=private_key "$KV_PATH" > "$TMPKEY"
 chmod 600 "$TMPKEY"
