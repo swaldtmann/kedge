@@ -22,7 +22,8 @@
 # Environment (optional):
 #   HCLOUD_CONTEXT        hcloud CLI context (default: kigulls-test)
 #   HCLOUD_TOKEN          Alternative: API token directly
-#   VERIFY_SERVER_TYPE    Server type (default: cx23)
+#   VERIFY_SERVER_TYPE    Server type (default: cx43 — SYSTEM_PATHS restores
+#                         exceed cx23's 40GB disk, KEDGE-W-013 Bug 3)
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
 #   SSH_KEY_NAME          SSH key in hcloud (default: stephan@waldtmann.de)
 #   RESTIC_SFTP_KEY       Private key for sftp: repositories — uploaded to the verify
@@ -49,7 +50,7 @@ RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
 RESTIC_PASSWORD="${RESTIC_PASSWORD:-}"
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
 HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
-VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cx23}"
+VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cx43}"
 VERIFY_LOCATION="${VERIFY_LOCATION:-nbg1}"
 VERIFY_IMAGE="ubuntu-24.04"
 SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
@@ -321,7 +322,7 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
     case "$IMAGE" in
         *postgres*|*postgis*)
             PG_USER=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
-                | grep '^POSTGRES_USER=' | cut -d= -f2)
+                | grep '^POSTGRES_USER=' | cut -d= -f2 || true)
             PG_USER="${PG_USER:-postgres}"
             if docker exec "$CONTAINER" pg_isready -U "$PG_USER" >/dev/null 2>&1; then
                 echo "  PASS: PostgreSQL [$svc] accepting connections"
@@ -334,7 +335,7 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
             ;;
         *mariadb*|*mysql*)
             ROOT_PASS=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
-                | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2)
+                | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2 || true)
             # KEDGE-W-004: modern mariadb:11+ images only ship mariadb-admin, not
             # mysqladmin -- same binary split already fixed in src/kedge/engines.py
             # and restore.sh's dump-import path.
@@ -615,7 +616,7 @@ Environment (required):
 
 Environment (optional):
   HCLOUD_CONTEXT         hcloud CLI context (default: kigulls-test)
-  VERIFY_SERVER_TYPE     Server type (default: cx23)
+  VERIFY_SERVER_TYPE     Server type (default: cx43)
   VERIFY_LOCATION        Datacenter (default: nbg1)
   RESTIC_SFTP_KEY        Private key for sftp: repositories (uploaded to verify box)
   RESTIC_NO_LOCK         Set to "1" for read-only repository credentials
