@@ -319,7 +319,16 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
     CONTAINER=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     [ -z "$CONTAINER" ] && continue
 
-    case "$IMAGE" in
+    # Match on the bare image name (registry/namespace + tag stripped), not
+    # the full "repo:tag" string -- app images tag their DB-flavor variant
+    # into the tag itself (e.g. xwiki:16.9.0-mariadb-tomcat), which a
+    # substring match against the full string false-positives as a MariaDB
+    # server (KEDGE-W-013 Bug 5: xwiki got probed with mariadb-admin and
+    # "failed", even though the actual mariadb container was healthy).
+    BASE_IMAGE="${IMAGE##*/}"
+    BASE_IMAGE="${BASE_IMAGE%%:*}"
+
+    case "$BASE_IMAGE" in
         *postgres*|*postgis*)
             PG_USER=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
                 | grep '^POSTGRES_USER=' | cut -d= -f2 || true)
