@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# verify-restore-key-from-bao.sh — KEDGE-W-008
+# verify-restore-key-from-bao.sh — KEDGE-W-008, erweitert KEDGE-W-013 Folge
 #
-# Wrapper um verify.sh: zieht den Storage-Box-Subaccount-Private-Key fuer den
-# quartalsweisen Test-Restore aus OpenBao statt aus einer lokalen Datei. Der Key
-# liegt nirgends dauerhaft auf der Maschine — nur fuer die Laufzeit dieses Scripts
-# in einer 0600-Temp-Datei, danach geshreddet (auch bei Fehlern, via trap).
+# Wrapper um verify.sh: zieht den Storage-Box-Subaccount-Private-Key UND das
+# restic-Repo-Passwort fuer den quartalsweisen Test-Restore aus OpenBao statt
+# aus einer lokalen Datei/manuellem SSH-Griff auf prod-cloud. Beide liegen
+# nirgends dauerhaft auf der Maschine — nur fuer die Laufzeit dieses Scripts
+# in 0600-Temp-Dateien, danach geshreddet (auch bei Fehlern, via trap).
 #
 # Voraussetzung: role_id/secret_id der AppRole `byrd-kedge-restore` liegen im
 # macOS-Keychain (service "kedge-restore-approle-role-id"/"-secret-id", account
 # "byrd") — AppRole ist per secret_id_bound_cidrs/token_bound_cidrs an die
 # WooAir-WAN-IP gebunden, read-only auf genau EINEN KV-Pfad
-# (secret/kedge/storage-box-restore-ewh-prod).
+# (secret/kedge/storage-box-restore-ewh-prod), der seit KEDGE-W-013 zwei
+# Felder traegt: `private_key` (Storage-Box-SFTP) und `restic_password`
+# (Repo-Entschluesselung — vorher musste das per Read-only-SSH live aus
+# prod-cloud .kedge.env gezogen werden, KEDGE-W-013-Live-Validierung
+# 2026-08-07, "Offen"-Punkt).
 #
 # Usage: ./verify-restore-key-from-bao.sh [weitere verify.sh-Argumente/Env]
 #   Beispiel: RESTIC_REPOSITORY=sftp:u564740-sub1@u564740-sub1.your-storagebox.de:. \
@@ -20,6 +25,8 @@
 #   Chroot-Root auf (Lstat /config: file does not exist, KEDGE-W-013 Bug 2).
 #   RESTIC_NO_LOCK=1, weil der Subaccount readonly ist — restic will sonst
 #   ein Lock-File schreiben und scheitert schon beim Lesen.
+#   RESTIC_PASSWORD/RESTIC_PASSWORD_FILE NICHT mehr selbst setzen — kommt seit
+#   KEDGE-W-013 aus demselben KV-Feld wie der Key, wird hier ueberschrieben.
 
 set -euo pipefail
 
@@ -28,9 +35,10 @@ KV_PATH="${KV_PATH:-secret/kedge/storage-box-restore-ewh-prod}"
 KEDGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 TMPKEY="$(mktemp)"
+TMPPW="$(mktemp)"
 TMPROLE="$(mktemp)"
 TMPSECRET="$(mktemp)"
-cleanup() { rm -f "$TMPKEY" "$TMPROLE" "$TMPSECRET"; }
+cleanup() { rm -f "$TMPKEY" "$TMPPW" "$TMPROLE" "$TMPSECRET"; }
 trap cleanup EXIT
 
 # role_id/secret_id ueber @file statt Argv reinreichen — sonst stehen sie kurz
@@ -56,7 +64,12 @@ client_token="$(BAO_ADDR="$BAO_ADDR" bao write -format=json auth/approle/login \
 BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$client_token" bao kv get -field=private_key "$KV_PATH" > "$TMPKEY"
 chmod 600 "$TMPKEY"
 
+BAO_ADDR="$BAO_ADDR" BAO_TOKEN="$client_token" bao kv get -field=restic_password "$KV_PATH" > "$TMPPW"
+chmod 600 "$TMPPW"
+unset client_token
+
 export RESTIC_SFTP_KEY="$TMPKEY"
+export RESTIC_PASSWORD_FILE="$TMPPW"
 "$KEDGE_DIR/verify.sh" "$@"
 # kein exec: der EXIT-trap (Key-Shred) muss in DIESEM Prozess feuern, nicht im
 # ersetzten verify.sh-Image.
