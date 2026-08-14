@@ -63,7 +63,9 @@ KEEP_BOX=false
 
 SNAPSHOT_ID="${1:-latest}"
 VERIFY_PREFIX="kedge-verify"
-BOX_NAME="${VERIFY_PREFIX}-$(date +%H%M)"
+# Datum+Uhrzeit statt nur Uhrzeit (CW-W-296 Teil 2) -- zwei Laeufe zur selben
+# Minute an verschiedenen Tagen kollidierten sonst im Box-Namen.
+BOX_NAME="${VERIFY_PREFIX}-$(date +%Y%m%d-%H%M)"
 BOX_IP=""
 
 # Verify context (exported for hooks)
@@ -194,7 +196,9 @@ create_box() {
                 --image "$VERIFY_IMAGE" \
                 --location "$loc" \
                 --ssh-key "$SSH_KEY_NAME" \
-                --label "purpose=kedge-verify" >/dev/null 2>&1; then
+                --label "purpose=kedge-verify" \
+                --label "class=ephemeral" \
+                --label "ttl=$(date -u -d '+1 day' +%Y-%m-%d)" >/dev/null 2>&1; then
                 created=true
                 ok "Server $name created ($stype, $loc)"
                 break 2
