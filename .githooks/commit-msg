@@ -2,9 +2,15 @@
 # tools/require-ticket-ref — commit-msg Hook (CW-W-198 Phase 2)
 #
 # Erzwingt: ein Commit, der repos/, tools/ oder .claude/ beruehrt, muss eine
-# Ticket-ID im Schema <PROJEKT>-<PERSONA>-<NNN> (Grossbuchstaben-Prefix,
-# Bindestrich-getrennt, 3+ Ziffern, z.B. CW-W-198, KIG-W-017, EWH-W-139) in
-# der Commit-Message fuehren, ODER das literale [no-ticket] als Opt-out.
+# Ticket-Referenz in der Commit-Message fuehren, ODER das literale [no-ticket]
+# als Opt-out. Zwei gueltige Formen (CW-W-339-Folge, 2026-09-03 — Auftraege
+# ohne Alt-ID sind seit dem ID-losen Auftrags-Schema der Normalfall, vorher
+# zwang das jeden solchen Commit faelschlich auf [no-ticket], obwohl ein
+# echtes Zammad-Ticket existiert):
+#   - Alte ID: <PROJEKT>-<PERSONA>-<NNN> (Grossbuchstaben-Prefix,
+#     Bindestrich-getrennt, 3+ Ziffern, z.B. CW-W-198, KIG-W-017, EWH-W-139)
+#   - Zammad-Ticketnummer: #<NNN> (3+ Ziffern, z.B. #495, #13503) — die
+#     Referenz-Konvention aus cowork/playbook.md fuer Auftraege ohne Alt-ID.
 # Fehlt beides -> Ablehnung (exit 1). Berueht der Commit keinen der drei
 # Pfade -> kein Zwang, Hook laesst durch (exit 0).
 #
@@ -28,7 +34,7 @@
 set -euo pipefail
 
 DEFAULT_SCOPE='^(repos|tools|\.claude)(/|$)'
-TICKET_RE='[A-Z][A-Z0-9]*-[A-Z]-[0-9]{3,}'
+TICKET_RE='[A-Z][A-Z0-9]*-[A-Z]-[0-9]{3,}|#[0-9]{3,}'
 
 MSG_FILE="${1:-}"
 [ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
@@ -59,9 +65,11 @@ fi
 cat >&2 <<EOF
 require-ticket-ref: Commit beruehrt repos/, tools/ oder .claude/ (bzw. den
 konfigurierten Scope), aber die Commit-Message enthaelt weder eine Ticket-ID
-(<PROJEKT>-<PERSONA>-<NNN>, z.B. CW-W-198) noch das Opt-out [no-ticket].
+(<PROJEKT>-<PERSONA>-<NNN>, z.B. CW-W-198) noch eine Zammad-Ticketnummer
+(#<NNN>, z.B. #13503) noch das Opt-out [no-ticket].
 
 Beispiel:  CW-W-198: require-ticket-ref Hook gebaut
+Oder:      #13503: dev-Golden-Snapshot gebaut
 Kein Ticket dazu? Message-Zeile ergaenzen mit: [no-ticket]
 EOF
 exit 1
