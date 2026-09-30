@@ -53,9 +53,9 @@ or a plain solo box.
 
 | Issue | Phase |
 |-------|-------|
-| [#1](https://codeberg.org/StephanWaldtmann/kedge/issues/1) Checksum Verify | Phase 2 |
-| [#3](https://codeberg.org/StephanWaldtmann/kedge/issues/3) SFTP Provisioning | Phase 3 |
-| [#4](https://codeberg.org/StephanWaldtmann/kedge/issues/4) Multi-Compose | Phase 3 |
+| [#1](https://git.authbox.de/stephan/kedge/issues/1) Checksum Verify | Phase 2 |
+| [#3](https://git.authbox.de/stephan/kedge/issues/3) SFTP Provisioning | Phase 3 |
+| [#4](https://git.authbox.de/stephan/kedge/issues/4) Multi-Compose | Phase 3 |
 
 ## DB Engine Registry (KEDGE-W-004) ✅
 
