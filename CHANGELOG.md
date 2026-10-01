@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-01
+
 ### Added
 - **Live-bind-mount restore guard for external mounts (CW-W-258 follow-up),
   mirroring CW-W-243's Docker-volume guard.** Restoring an external bind
@@ -22,8 +24,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `--force-live` is passed, exactly like the existing volume guard's
   messaging and semantics. Applies to both the new direct-path format and
   the legacy tar.gz format.
+- **`tools/verify-restore-key-from-bao.sh` (KEDGE-W-008, KEDGE-W-013)** —
+  wrapper for `verify.sh` that logs into OpenBao via AppRole (role_id/secret_id
+  passed via `@file`, not argv), reads the storage-box restore key and the
+  restic repository password from KV into 0600 temp files, and shreds them on
+  exit. The AppRole token is extracted from the JSON login response (`bao write
+  -field=client_token` does not work on login endpoints).
+- **`verify.sh`: `RESTIC_SFTP_KEY` (AFKI-W-157)** — ships an SFTP identity key
+  onto the throwaway box so a readonly storage-box credential can be tested.
+  Usage docs now show the relative chroot repo form (`sftp:...:.`) for
+  storage-box subaccounts.
+- **`verify.sh`: TTL labels (CW-W-296)** — verify boxes get
+  `class=ephemeral` and `ttl=<today+1d>` labels so a sweep can match them.
+- `test.sh`: `nextcloud_data` docker-volume scenario (AFKI-W-237) as a live
+  regression guard for the `SYSTEM_PATHS_EXCLUDE` fix below.
+
+### Changed
+- `backup.sh` / Python `restic.backup()` parse the `BACKUP_SIZE` figure from
+  restic's own summary line instead of running `restic stats` over the whole
+  repository afterwards (EWH-W-135) — no second full-repo scan, no extra lock.
+- `ssh_box()`/`SSH_OPTS` moved into `lib/ssh.sh`, sourced by `verify.sh` and
+  `test.sh` (KEDGE-W-006) — pure dedup, no behaviour change.
+- README documents the Python CLI and the shell/CLI equivalence table.
 
 ### Fixed
+- **`SYSTEM_PATHS_EXCLUDE` emptied explicitly backed-up Docker volumes
+  (KEDGE-W-007).** restic applies `--exclude` to the whole invocation, so an
+  entry such as `/var/lib/docker/volumes` silently removed every explicit
+  volume backup path (live snapshots on `prod-cloud` had 0 files in 14
+  volumes). Entries that are a prefix of an explicit backup path are now
+  dropped before calling restic (shell + Python).
+- **MariaDB images without `mysql`/`mysqladmin`** — `restore.sh` (import) and
+  `verify.sh` (healthcheck) now detect `mariadb`/`mariadb-admin` like the
+  Python engine registry already did; before, the dump import failed silently
+  and all app databases were missing after restore.
+- `mariadb-dump`/`mysqldump` run with `--single-transaction` (MVCC-consistent
+  snapshot on InnoDB instead of table locks; shell + Python).
+- `verify.sh`/`test.sh` `ssh_box()` argv injection (KEDGE-W-005): trailing
+  args are now `%q`-quoted into one string, so `$`/backtick/`;` in a password
+  arrive literally on the box instead of being expanded by the remote shell.
+- `verify.sh`: `RESTIC_NO_LOCK=1` for readonly repository access (also in
+  `restore.sh`); box type/location fallback updated to `cx23`/`cpx22`/`cax11`
+  (+`hel1`), `test.sh` defaults aligned (`cx23`, context `dev_und_test_boxen`).
+- `verify.sh`: box name now includes the date (`kedge-verify-YYYYMMDD-HHMM`) —
+  time-only names collided across days (CW-W-296); health checks match the
+  bare image name instead of the full `repo:tag` string and guard two
+  unprotected pipeline assignments (KEDGE-W-013).
+- `kedge restore`: `pg_dumpall` import connects with `-d postgres` instead of
+  a database named after the user (silent no-op when `POSTGRES_DB` differed).
+- `kedge verify`: no `rsync --protect-args` on openrsync/BSD-rsync (macOS);
+  `__version__` is derived from installed dist-info instead of hardcoded.
 - **External bind mounts backed up as direct restic paths, not tar.gz (CW-W-258).**
   Both `backup.sh` and the Python port (`collect.py`/`commands.py`) tarred +
   gzipped every Compose bind mount declared outside `$STACK_DIR` before
@@ -125,8 +175,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   box. Latent in both shell and python verify (`verify.sh:485` has the
   same underlying issue), surfaced by the first live run with a
   `$`-containing restic password. Now `shlex.quote`s every value into a
-  single ssh command string; the local-repo rsync transfer additionally
-  gets `--protect-args` (`-s`) for the same reason on its own remote hop.
+  single ssh command string; the local-repo rsync transfer shell-quotes its
+  remote path for the same reason (`--protect-args` does not exist in macOS's
+  openrsync).
 - checksum verify could never pass for tar-fallback backups (macOS/Docker-
   Desktop, any host without direct volume mountpoints) — backup hashed the
   .tar.gz, restore hashed the unpacked tree; surfaced by the live roundtrip.
