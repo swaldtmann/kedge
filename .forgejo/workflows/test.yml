@@ -1,0 +1,42 @@
+# Forgejo Actions on git.authbox.de (self-hosted runner, jobs run as Docker
+# containers). Tests only: no secrets, no deploy, no release step.
+# test.sh (Hetzner roundtrip) is NOT run here -- it needs cloud credentials.
+name: test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: self-hosted
+    timeout-minutes: 20
+    container:
+      # Needs Node (for actions/checkout); act-24.04 bundles Node + Python 3.12.
+      image: catthehacker/ubuntu:act-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system tools
+        # bats: shell tests; restic: tests build real local repos (no mocks);
+        # jq + rsync: used by backup.sh/restore.sh. Docker is deliberately not
+        # installed: restore-live-volume-guard.bats skips itself without it.
+        run: |
+          SUDO=""
+          [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+          $SUDO apt-get update -qq
+          $SUDO apt-get install -y -qq bats restic jq rsync
+          bats --version
+          restic version
+      - name: Install Python deps
+        # dev tools live in [dependency-groups], not extras, so install them
+        # explicitly. venv avoids PEP 668 (externally-managed). shiv builds
+        # dist/kedge (gitignored), which tests/py/test_verify.py expects.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e . pytest pytest-cov shiv
+          mkdir -p dist
+          .venv/bin/shiv -c kedge -o dist/kedge .
+      - name: Python tests
+        run: .venv/bin/pytest -m "not integration" -q
+      - name: Bash tests (bats)
+        # ~3 min locally (each test builds a restic repo). The explicit
+        # timeout turns a hang into rc=124 instead of a silent stall.
+        run: timeout 600 bats tests/*.bats
