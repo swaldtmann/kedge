@@ -54,15 +54,15 @@ export RESTORE_TARGET=/opt/myapp
 | Shell command | Python CLI equivalent | Description |
 |---------|---------|-------------|
 | `backup.sh init` | `kedge init` | Initialize restic repository |
-| `backup.sh discover` | `kedge discover [--as-json]` | Dry-run: show what would be backed up |
+| `backup.sh discover` | `kedge discover [--json]` | Dry-run: show what would be backed up |
 | `backup.sh backup` | `kedge backup` | Full backup (dumps + volumes + files → restic) |
 | `backup.sh list` | `kedge list` (alias: `kedge snapshots`) | List snapshots |
 | `backup.sh check` | `kedge check` | Verify repository integrity |
 | `backup.sh prune` | `kedge prune` | Remove old snapshots per retention policy |
-| `verify.sh [snapshot]` | `kedge verify [snapshot] [--keep-box]` | Restore verification on ephemeral hcloud box |
+| `verify.sh [snapshot]` | `kedge verify [snapshot] [--keep]` | Restore verification on ephemeral hcloud box |
 | `verify.sh --burn` | `kedge burn` | Clean up leftover verify boxes |
 | `restore.sh [snapshot]` | `kedge restore [snapshot] [--force-live]` | Full restore (default: latest) |
-| `restore.sh --verify` | `kedge restore [snapshot] --verify-only` | Restore files only, don't start stack |
+| `restore.sh --verify` | `kedge restore [snapshot] --verify` | Restore files only, don't start stack |
 | `test.sh` | — (no CLI equivalent yet) | Full roundtrip test on Hetzner Cloud |
 | `test.sh --keep` | — | Test without burning boxes after |
 | `test.sh --burn` | — | Clean up leftover test boxes |
@@ -77,7 +77,7 @@ shell scripts:
 pip install .          # or: pipx install .
 kedge init
 kedge backup
-kedge restore latest --verify-only
+kedge restore latest --verify
 ```
 
 `restore.sh --list` has no direct CLI equivalent yet — use `kedge list`
