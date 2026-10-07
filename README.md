@@ -74,7 +74,7 @@ reforge, Phase 1+2 — see `ROADMAP.md`), same environment variables as the
 shell scripts:
 
 ```bash
-pip install .          # or: pipx install .
+pip install .          # or: pipx install . (run from a checkout of this repository)
 kedge init
 kedge backup
 kedge restore latest --verify
