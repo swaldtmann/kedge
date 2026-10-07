@@ -4,10 +4,16 @@ Thanks for your interest in Kedge! Contributions are welcome.
 
 ## How to Contribute
 
-1. **Open an issue** — Found a bug or have a feature idea? Open an issue on Codeberg first.
-2. **Fork + branch** — Fork the repo, create a feature branch (`feature/short-description`).
-3. **Make changes** — Write code, add tests.
-4. **Pull request** — Open a PR against `main`. Describe what and why.
+This repository is a read-only mirror; the source of truth lives elsewhere.
+There is **no public issue tracker**. Bug reports, feature ideas and patches go
+by e-mail to **security@waldtmann.de** (the same address as in
+[SECURITY.md](SECURITY.md); for vulnerabilities, follow that file instead).
+
+1. **Report or discuss** — Found a bug or have a feature idea? Send an e-mail first.
+2. **Prepare a change** — Create a feature branch (`feature/short-description` or
+   `fix/short-description`), write code, add tests.
+3. **Send the patch** — Attach the output of `git format-patch` (or a link to your
+   branch) and describe what and why.
 
 ## Git Conventions
 
@@ -17,7 +23,9 @@ Thanks for your interest in Kedge! Contributions are welcome.
 
 ### Commit Messages
 
-Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
+A short, imperative subject line, optionally prefixed with a type such as
+`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `ci:` or `release:`
+(optionally with a scope, e.g. `docs(readme):`). The body explains the why.
 
 ## QA
 
@@ -38,8 +46,8 @@ Before tagging a new release:
 1. Update `CHANGELOG.md` — move Unreleased items to the new version
 2. Update `SECURITY.md` — Supported Versions table matches the new release
 3. Create tag: `git tag v<version>`
-4. Create Codeberg Release with CHANGELOG excerpt
-5. Verify: tag, release, CHANGELOG, SECURITY.md all consistent
+4. Push the tag (the public mirror follows the source of truth)
+5. Verify: tag, CHANGELOG, SECURITY.md all consistent
 
 ## What We Don't Accept
 
