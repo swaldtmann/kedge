@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `tests/bindmount-roundtrip.bats`: host-less backup.sh -> restore.sh roundtrip
+  for external bind mounts (two single-file mounts with the same basename plus
+  a directory mount, sha256 compared at the original paths). Green on v0.5.1;
+  against v0.3.4 scripts the file mount is not restored.
+
+### Known limitations
+- Snapshots written by kedge <= 0.3.x store single-file external bind mounts
+  flat under `external-mounts/` by basename only; the original path is not
+  recorded anywhere, so these files cannot be restored to their original
+  location (restore.sh ignores them silently). Directory mounts from such
+  snapshots restore correctly, except that `_` in the original path is decoded
+  as `/`. Re-run `kedge backup` with >= 0.5.0 to get a snapshot in the direct
+  path format.
+
 ## [0.5.1] - 2026-10-01
 
 ### Added
