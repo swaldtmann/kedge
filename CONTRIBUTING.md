@@ -6,8 +6,8 @@ Thanks for your interest in Kedge! Contributions are welcome.
 
 This repository is a read-only mirror; the source of truth lives elsewhere.
 There is **no public issue tracker**. Bug reports, feature ideas and patches go
-by e-mail to **security@waldtmann.de** (the same address as in
-[SECURITY.md](SECURITY.md); for vulnerabilities, follow that file instead).
+by e-mail to **opensource@waldtmann.de**. For security vulnerabilities, follow
+[SECURITY.md](SECURITY.md) instead.
 Pull requests opened on the mirror are not merged here — the mirror is
 overwritten from the source of truth. Please send patches by e-mail instead.
 
