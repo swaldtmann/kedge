@@ -148,8 +148,8 @@ _HEALTHCHECK_SCRIPT = _HEALTHCHECK_SCRIPT_HEAD.replace("{db_case_block}", build_
 # cx23 nur an hel1 (EUR 0.0088/h, 2 vCPU/4 GB) als Default, cpx22/cpx12 als
 # ueberall verfuegbare Fallbacks. Default-Location deshalb hel1 (dort ist cx23
 # verfuegbar). Der fruehere Default-Kontext existiert nicht mehr (2026-07-26
-# geloescht) -> greenfields (Wegwerfbox-Kontext).
-DEFAULT_CONTEXT = "greenfields"
+# geloescht). Hcloud-Kontext und SSH-Key-Name haben keinen Default mehr; sie
+# muessen gesetzt werden (siehe _require_hcloud_context/_require_ssh_key_name).
 DEFAULT_SERVER_TYPE = "cx23"
 DEFAULT_LOCATION = "hel1"
 SERVER_TYPE_FALLBACKS = ("cx23", "cpx22", "cpx12")
@@ -163,11 +163,11 @@ DEFAULT_KEDGE_BINARY = str(Path(__file__).resolve().parent.parent.parent / "dist
 
 @dataclass
 class VerifyConfig:
-    hcloud_context: str = DEFAULT_CONTEXT
+    hcloud_context: str = ""
     hcloud_token: str = ""
     server_type: str = DEFAULT_SERVER_TYPE
     location: str = DEFAULT_LOCATION
-    ssh_key_name: str = "stephan@waldtmann.de"
+    ssh_key_name: str = ""
     restore_target: str = DEFAULT_RESTORE_TARGET
     post_hook: str = ""
     fail_hook: str = ""
@@ -176,11 +176,11 @@ class VerifyConfig:
     @classmethod
     def from_env(cls) -> "VerifyConfig":
         return cls(
-            hcloud_context=os.environ.get("HCLOUD_CONTEXT") or DEFAULT_CONTEXT,
+            hcloud_context=os.environ.get("HCLOUD_CONTEXT", ""),
             hcloud_token=os.environ.get("HCLOUD_TOKEN", ""),
             server_type=os.environ.get("VERIFY_SERVER_TYPE") or DEFAULT_SERVER_TYPE,
             location=os.environ.get("VERIFY_LOCATION") or DEFAULT_LOCATION,
-            ssh_key_name=os.environ.get("SSH_KEY_NAME") or "stephan@waldtmann.de",
+            ssh_key_name=os.environ.get("SSH_KEY_NAME", ""),
             restore_target=os.environ.get("RESTORE_TARGET") or DEFAULT_RESTORE_TARGET,
             post_hook=os.environ.get("VERIFY_POST_HOOK", ""),
             fail_hook=os.environ.get("VERIFY_FAIL_HOOK", ""),
@@ -217,6 +217,18 @@ def _hcloud_env(vcfg: VerifyConfig) -> dict:
     return env
 
 
+def _require_hcloud_context(vcfg: VerifyConfig) -> None:
+    if not vcfg.hcloud_token and not vcfg.hcloud_context:
+        raise KedgeError(
+            "set HCLOUD_CONTEXT to the hcloud CLI context for throwaway test servers (or set HCLOUD_TOKEN)"
+        )
+
+
+def _require_ssh_key_name(vcfg: VerifyConfig) -> None:
+    if not vcfg.ssh_key_name:
+        raise KedgeError("set SSH_KEY_NAME to the name of the hcloud SSH key to install on the throwaway servers")
+
+
 def check_verify_prereqs(cfg: Config, vcfg: VerifyConfig) -> None:
     missing = [tool for tool in ("hcloud", "ssh", "scp", "restic") if shutil.which(tool) is None]
     if missing:
@@ -227,6 +239,9 @@ def check_verify_prereqs(cfg: Config, vcfg: VerifyConfig) -> None:
         raise KedgeError("RESTIC_REPOSITORY not set")
     if not cfg.restic_password and not cfg.restic_password_file:
         raise KedgeError("RESTIC_PASSWORD or RESTIC_PASSWORD_FILE not set")
+
+    _require_hcloud_context(vcfg)
+    _require_ssh_key_name(vcfg)
 
     if not vcfg.hcloud_token:
         env = _hcloud_env(vcfg)
@@ -468,6 +483,7 @@ def cmd_verify(cfg: Config, vcfg: VerifyConfig, snapshot_id: str = "latest", kee
 
 
 def cmd_burn(vcfg: VerifyConfig) -> None:
+    _require_hcloud_context(vcfg)
     env = _hcloud_env(vcfg)
     if not vcfg.hcloud_token:
         subprocess.run(["hcloud", "context", "use", vcfg.hcloud_context], env=env, check=False)

@@ -281,9 +281,12 @@ Services with built-in crash recovery or no mutable state:
 Tests the full backup → restore cycle on Hetzner Cloud:
 
 ```bash
-export HCLOUD_TOKEN=<your-token>
+export HCLOUD_TOKEN=<your-token>   # or: export HCLOUD_CONTEXT=<hcloud CLI context>
+export SSH_KEY_NAME=<name of an SSH key in your hcloud project>
 ./test.sh
 ```
+
+`HCLOUD_TOKEN` (or `HCLOUD_CONTEXT`) and `SSH_KEY_NAME` have no defaults; the script aborts before any hcloud call if they are missing.
 
 This creates two ephemeral VPS boxes, deploys a sample stack (Postgres + Valkey + Nginx), seeds test data, backs up, restores on a fresh box, verifies data integrity, and burns both.
 
@@ -298,6 +301,10 @@ Monthly automated proof that your backups actually work. Spins up a fresh Hetzne
 # Cron: monthly on the 1st at 05:00 UTC
 0 5 1 * * root . /etc/kedge-backup.env && /usr/local/bin/kedge-verify latest >> /var/log/kedge-verify.log 2>&1
 ```
+
+Required environment (no defaults; verify aborts before any hcloud call if one is missing):
+- `HCLOUD_CONTEXT`: hcloud CLI context for throwaway test servers (not needed when `HCLOUD_TOKEN` is set)
+- `SSH_KEY_NAME`: name of the SSH key in hcloud that is installed on the verify box
 
 Health checks:
 - All containers from `docker-compose.yml` are running

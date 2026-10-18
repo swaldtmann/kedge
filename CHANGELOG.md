@@ -9,6 +9,17 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `verify.sh`, `test.sh` and `kedge verify` / `kedge burn` no longer
+  have built-in defaults for the hcloud context (`HCLOUD_CONTEXT`) or the hcloud
+  SSH key name (`SSH_KEY_NAME`). Both must be set (`HCLOUD_CONTEXT` is not needed
+  when `HCLOUD_TOKEN` is set; `--burn` / `kedge burn` need no `SSH_KEY_NAME`).
+  If one is missing, the tool aborts with a clear message before the first hcloud
+  call. Cron lines and env files that relied on the old defaults must set them.
+
+### Removed
+- The maintainer-only script `tools/verify-restore-key-from-bao.sh`.
+
 ### Added
 - `tests/bindmount-roundtrip.bats`: host-less backup.sh -> restore.sh roundtrip
   for external bind mounts (two single-file mounts with the same basename plus

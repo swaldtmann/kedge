@@ -109,6 +109,15 @@ cd /opt/myapp
 docker compose up -d
 ```
 
+## Scheduled Verification (verify.sh / `kedge verify`)
+
+`verify.sh` and `kedge verify` restore the latest snapshot onto a throwaway Hetzner Cloud box. Besides the restic variables they need two settings without defaults; if one is missing, the run aborts before any hcloud call:
+
+- `HCLOUD_CONTEXT`: the hcloud CLI context for throwaway test servers (not needed when `HCLOUD_TOKEN` is set)
+- `SSH_KEY_NAME`: the name of the SSH key in hcloud that is installed on the verify box
+
+`kedge burn` / `verify.sh --burn` needs only `HCLOUD_CONTEXT` (or `HCLOUD_TOKEN`).
+
 ## Volume Name Mapping
 
 The backup stores a `meta.json` with the original Docker volume names (e.g., `myproject_pg_data`). The restore script uses this mapping to recreate volumes with the correct names so that `docker compose up` finds them.

@@ -25,10 +25,10 @@ def test_verify_config_from_env_defaults(monkeypatch):
                 "SSH_KEY_NAME", "RESTORE_TARGET", "VERIFY_POST_HOOK", "VERIFY_FAIL_HOOK"):
         monkeypatch.delenv(key, raising=False)
     vcfg = verify.VerifyConfig.from_env()
-    assert vcfg.hcloud_context == "greenfields"
+    assert vcfg.hcloud_context == ""
     assert vcfg.server_type == "cx23"
     assert vcfg.location == "hel1"
-    assert vcfg.ssh_key_name == "stephan@waldtmann.de"
+    assert vcfg.ssh_key_name == ""
     assert vcfg.restore_target == "/opt/stack"
 
 
@@ -71,16 +71,16 @@ def test_check_verify_prereqs_hcloud_context_switch_failure(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    with pytest.raises(KedgeError, match="hcloud context 'greenfields' not found"):
-        verify.check_verify_prereqs(_cfg(), verify.VerifyConfig())
+    with pytest.raises(KedgeError, match="hcloud context 'myctx' not found"):
+        verify.check_verify_prereqs(_cfg(), verify.VerifyConfig(hcloud_context="myctx", ssh_key_name="mykey"))
 
 
 def test_check_verify_prereqs_ok(monkeypatch):
     import shutil as shutil_mod
 
     monkeypatch.setattr(shutil_mod, "which", lambda tool: "/usr/bin/" + tool)
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="greenfields\n"))
-    verify.check_verify_prereqs(_cfg(), verify.VerifyConfig())  # must not raise
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="myctx\n"))
+    verify.check_verify_prereqs(_cfg(), verify.VerifyConfig(hcloud_context="myctx", ssh_key_name="mykey"))  # must not raise
 
 
 # --- resolve_snapshot ----------------------------------------------------------
@@ -468,7 +468,52 @@ def test_cmd_burn_deletes_all_prefixed_boxes(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    verify.cmd_burn(verify.VerifyConfig())
+    verify.cmd_burn(verify.VerifyConfig(hcloud_context="myctx"))
 
     delete_targets = {c[3] for c in deleted if c[:3] == ["hcloud", "server", "delete"]}
     assert delete_targets == {"kedge-verify-1200", "kedge-verify-1300"}
+
+
+# --- required hcloud context / SSH key (no built-in defaults) -------------------
+
+def _hcloud_calls(monkeypatch):
+    import shutil as shutil_mod
+
+    monkeypatch.setattr(shutil_mod, "which", lambda tool: "/usr/bin/" + tool)
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls
+
+
+def test_check_verify_prereqs_requires_hcloud_context(monkeypatch):
+    calls = _hcloud_calls(monkeypatch)
+    vcfg = verify.VerifyConfig(ssh_key_name="mykey")
+    with pytest.raises(KedgeError, match="set HCLOUD_CONTEXT to the hcloud CLI context for throwaway test servers"):
+        verify.check_verify_prereqs(_cfg(), vcfg)
+    assert calls == []
+
+
+def test_check_verify_prereqs_requires_ssh_key_name(monkeypatch):
+    calls = _hcloud_calls(monkeypatch)
+    vcfg = verify.VerifyConfig(hcloud_context="myctx")
+    with pytest.raises(KedgeError, match="set SSH_KEY_NAME to the name of the hcloud SSH key"):
+        verify.check_verify_prereqs(_cfg(), vcfg)
+    assert calls == []
+
+
+def test_check_verify_prereqs_token_replaces_context(monkeypatch):
+    _hcloud_calls(monkeypatch)
+    vcfg = verify.VerifyConfig(hcloud_token="t", ssh_key_name="mykey")
+    verify.check_verify_prereqs(_cfg(), vcfg)  # must not raise
+
+
+def test_cmd_burn_requires_hcloud_context(monkeypatch):
+    calls = _hcloud_calls(monkeypatch)
+    with pytest.raises(KedgeError, match="set HCLOUD_CONTEXT"):
+        verify.cmd_burn(verify.VerifyConfig())
+    assert calls == []

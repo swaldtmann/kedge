@@ -15,9 +15,13 @@
 #   test.sh --keep              Don't burn boxes after test (for debugging)
 #   test.sh --burn              Burn any leftover test boxes
 #
-# Environment:
-#   HCLOUD_CONTEXT         hcloud CLI context to use (default: dev_und_test_boxen)
-#   HCLOUD_TOKEN           Alternative: API token directly (overrides context)
+# Environment (required):
+#   HCLOUD_CONTEXT         hcloud CLI context for throwaway test servers
+#                          (not needed when HCLOUD_TOKEN is set)
+#   SSH_KEY_NAME           Name of the SSH key in hcloud (not needed for --burn)
+#
+# Environment (optional):
+#   HCLOUD_TOKEN           Alternative to HCLOUD_CONTEXT: API token directly
 #   TEST_SERVER_TYPE       Server type (default: cx23)
 #   TEST_LOCATION          Datacenter (default: nbg1)
 # =============================================================================
@@ -31,11 +35,11 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
-HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-dev_und_test_boxen}"
+HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-}"
 TEST_SERVER_TYPE="${TEST_SERVER_TYPE:-cx23}"
 TEST_LOCATION="${TEST_LOCATION:-nbg1}"
 TEST_IMAGE="ubuntu-24.04"
-SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
+SSH_KEY_NAME="${SSH_KEY_NAME:-}"
 KEEP_BOXES=false
 
 # Test prefix for easy cleanup
@@ -62,10 +66,22 @@ die()   { err "$1"; exit 1; }
 # Prerequisites
 # ---------------------------------------------------------------------------
 
+require_hcloud_context() {
+    [[ -n "$HCLOUD_TOKEN" || -n "$HCLOUD_CONTEXT" ]] && return 0
+    die "set HCLOUD_CONTEXT to the hcloud CLI context for throwaway test servers (or set HCLOUD_TOKEN)"
+}
+
+require_ssh_key_name() {
+    [[ -n "$SSH_KEY_NAME" ]] && return 0
+    die "set SSH_KEY_NAME to the name of the hcloud SSH key to install on the throwaway servers"
+}
+
 check_prereqs() {
     for cmd in hcloud ssh scp; do
         command -v "$cmd" >/dev/null 2>&1 || die "Required: $cmd"
     done
+
+    require_hcloud_context
 
     if [[ -n "$HCLOUD_TOKEN" ]]; then
         export HCLOUD_TOKEN
@@ -611,6 +627,7 @@ cleanup_on_exit() {
 # ---------------------------------------------------------------------------
 
 cmd_test() {
+    require_ssh_key_name
     check_prereqs
     trap cleanup_on_exit EXIT
 
@@ -710,11 +727,15 @@ Options:
   --burn    Burn all leftover test boxes
   --help    Show this help
 
-Environment:
-  HCLOUD_TOKEN         Hetzner Cloud API token (required)
+Environment (required):
+  HCLOUD_CONTEXT       hcloud CLI context for throwaway test servers
+                       (not needed when HCLOUD_TOKEN is set)
+  SSH_KEY_NAME         SSH key name in hcloud (not needed for --burn)
+
+Environment (optional):
+  HCLOUD_TOKEN         Hetzner Cloud API token (alternative to HCLOUD_CONTEXT)
   TEST_SERVER_TYPE     Server type (default: cx23)
   TEST_LOCATION        Datacenter (default: nbg1)
-  SSH_KEY_NAME         SSH key name in hcloud (default: stephan@waldtmann.de)
   MOCKFORGE_DIR        Path to the mockforge repo (default: ../mockforge, sibling of kedge)
 
 What it does:

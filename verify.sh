@@ -18,14 +18,15 @@
 #   RESTIC_REPOSITORY     Where to pull the backup from
 #   RESTIC_PASSWORD       Restic encryption password
 #   RESTIC_PASSWORD_FILE  Alternative: file containing the password
+#   HCLOUD_CONTEXT        hcloud CLI context for throwaway test servers
+#                         (not needed when HCLOUD_TOKEN is set)
+#   SSH_KEY_NAME          Name of the SSH key in hcloud
 #
 # Environment (optional):
-#   HCLOUD_CONTEXT        hcloud CLI context (default: kigulls-test)
-#   HCLOUD_TOKEN          Alternative: API token directly
+#   HCLOUD_TOKEN          Alternative to HCLOUD_CONTEXT: API token directly
 #   VERIFY_SERVER_TYPE    Server type (default: cx43 — SYSTEM_PATHS restores
 #                         exceed cx23's 40GB disk)
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
-#   SSH_KEY_NAME          SSH key in hcloud (default: stephan@waldtmann.de)
 #   RESTIC_SFTP_KEY       Private key for sftp: repositories — uploaded to the verify
 #                         box so its restic can authenticate (the box has no SSH
 #                         identity of its own). Only used when RESTIC_REPOSITORY
@@ -49,11 +50,11 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
 RESTIC_PASSWORD="${RESTIC_PASSWORD:-}"
 HCLOUD_TOKEN="${HCLOUD_TOKEN:-}"
-HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-kigulls-test}"
+HCLOUD_CONTEXT="${HCLOUD_CONTEXT:-}"
 VERIFY_SERVER_TYPE="${VERIFY_SERVER_TYPE:-cx43}"
 VERIFY_LOCATION="${VERIFY_LOCATION:-nbg1}"
 VERIFY_IMAGE="ubuntu-24.04"
-SSH_KEY_NAME="${SSH_KEY_NAME:-stephan@waldtmann.de}"
+SSH_KEY_NAME="${SSH_KEY_NAME:-}"
 RESTIC_SFTP_KEY="${RESTIC_SFTP_KEY:-}"
 RESTIC_NO_LOCK="${RESTIC_NO_LOCK:-}"
 RESTORE_TARGET="${RESTORE_TARGET:-/opt/stack}"
@@ -112,6 +113,16 @@ run_hook() {
 # Prerequisites
 # ---------------------------------------------------------------------------
 
+require_hcloud_context() {
+    [[ -n "$HCLOUD_TOKEN" || -n "$HCLOUD_CONTEXT" ]] && return 0
+    die "set HCLOUD_CONTEXT to the hcloud CLI context for throwaway test servers (or set HCLOUD_TOKEN)"
+}
+
+require_ssh_key_name() {
+    [[ -n "$SSH_KEY_NAME" ]] && return 0
+    die "set SSH_KEY_NAME to the name of the hcloud SSH key to install on the throwaway servers"
+}
+
 check_prereqs() {
     for cmd in hcloud ssh scp restic; do
         command -v "$cmd" >/dev/null 2>&1 || die "Required: $cmd"
@@ -123,6 +134,9 @@ check_prereqs() {
     if [[ -z "$RESTIC_PASSWORD" && -z "${RESTIC_PASSWORD_FILE:-}" ]]; then
         die "RESTIC_PASSWORD or RESTIC_PASSWORD_FILE not set"
     fi
+
+    require_hcloud_context
+    require_ssh_key_name
 
     export RESTIC_REPOSITORY RESTIC_PASSWORD
     if [[ -n "${RESTIC_PASSWORD_FILE:-}" ]]; then
@@ -586,6 +600,7 @@ RESTORE
 }
 
 cmd_burn() {
+    require_hcloud_context
     if [[ -n "$HCLOUD_TOKEN" ]]; then
         export HCLOUD_TOKEN
     else
@@ -626,9 +641,12 @@ Environment (required):
   RESTIC_REPOSITORY      Restic repository
   RESTIC_PASSWORD        Encryption password
   RESTIC_PASSWORD_FILE   Alternative: path to password file
+  HCLOUD_CONTEXT         hcloud CLI context for throwaway test servers
+                         (not needed when HCLOUD_TOKEN is set)
+  SSH_KEY_NAME           Name of the SSH key in hcloud
 
 Environment (optional):
-  HCLOUD_CONTEXT         hcloud CLI context (default: kigulls-test)
+  HCLOUD_TOKEN           Alternative to HCLOUD_CONTEXT: API token directly
   VERIFY_SERVER_TYPE     Server type (default: cx43)
   VERIFY_LOCATION        Datacenter (default: nbg1)
   RESTIC_SFTP_KEY        Private key for sftp: repositories (uploaded to verify box)
