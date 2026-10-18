@@ -170,7 +170,7 @@ BOOTSTRAP
 }
 
 # ---------------------------------------------------------------------------
-# mockforge (synthetic Nextcloud-volume content, AFKI-W-237)
+# mockforge (synthetic Nextcloud-volume content)
 # ---------------------------------------------------------------------------
 
 MOCKFORGE_DIR="${MOCKFORGE_DIR:-$SCRIPT_DIR/../mockforge}"
@@ -235,7 +235,7 @@ services:
       - ./custom-config:/etc/nginx/conf.d:ro
 
   # Holds nextcloud_data alive -- content is a mockforge-generated file tree,
-  # written directly to the volume's host path (KEDGE-W-007 regression case:
+  # written directly to the volume's host path (regression case:
   # docker-volume backup via literal host path, not a bind mount).
   storage:
     image: busybox:stable
@@ -344,7 +344,7 @@ curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt
 # .env content
 cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt
 
-# nextcloud_data volume -- content hash + file count (KEDGE-W-007 regression case)
+# nextcloud_data volume -- content hash + file count (regression case)
 NC_MOUNT="$(docker volume inspect teststack_nextcloud_data --format '{{ .Mountpoint }}')"
 find "$NC_MOUNT" -type f -exec sha256sum {} \; | awk '{print $1}' | sort | sha256sum | awk '{print $1}' \
     > /tmp/kedge-verify/nextcloud-hash.txt
@@ -374,7 +374,7 @@ set -euo pipefail
 export STACK_DIR=/opt/test-stack
 export RESTIC_REPOSITORY=/backup/test-repo
 export RESTIC_PASSWORD="$1"
-# KEDGE-W-007 regression guard: a broad SYSTEM_PATHS_EXCLUDE entry that would
+# regression guard: a broad SYSTEM_PATHS_EXCLUDE entry that would
 # have shadowed the nextcloud_data docker-volume backup before the fix.
 export SYSTEM_PATHS="/var/log"
 export SYSTEM_PATHS_EXCLUDE="/var/lib/docker/volumes"
@@ -486,7 +486,7 @@ curl -s http://localhost:8080/ > /tmp/kedge-verify/nginx-page.txt 2>/dev/null ||
 # .env
 cat /opt/test-stack/.env > /tmp/kedge-verify/env-content.txt 2>/dev/null || echo "ENV_FAIL" > /tmp/kedge-verify/env-content.txt
 
-# nextcloud_data volume -- content hash + file count (KEDGE-W-007 regression case)
+# nextcloud_data volume -- content hash + file count (regression case)
 NC_MOUNT="$(docker volume inspect teststack_nextcloud_data --format '{{ .Mountpoint }}' 2>/dev/null || true)"
 if [[ -n "$NC_MOUNT" ]]; then
     find "$NC_MOUNT" -type f -exec sha256sum {} \; | awk '{print $1}' | sort | sha256sum | awk '{print $1}' \
@@ -545,7 +545,7 @@ VERIFY_CAPTURE
         failures=$((failures + 1))
     fi
 
-    # Compare: nextcloud_data volume (KEDGE-W-007 regression case -- docker
+    # Compare: nextcloud_data volume (regression case -- docker
     # volume backup via literal host path, guarded by SYSTEM_PATHS_EXCLUDE
     # overreach protection)
     local src_nc_hash dst_nc_hash src_nc_count dst_nc_count
@@ -719,7 +719,7 @@ Environment:
 
 What it does:
   1. Creates Box A (Hetzner), deploys a sample stack (Postgres + Valkey + Nginx +
-     a nextcloud_data docker volume seeded via mockforge -- KEDGE-W-007 regression case)
+     a nextcloud_data docker volume seeded via mockforge -- regression case)
   2. Seeds test data into all services
   3. Runs backup.sh (SYSTEM_PATHS_EXCLUDE=/var/lib/docker/volumes, the exact
      prod-bug pattern) → local restic repo

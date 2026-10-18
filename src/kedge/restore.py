@@ -1,6 +1,6 @@
 """Restore — port of restore.sh:106-433 (cmd_restore). Bare-metal restore:
 stack files, external bind mounts, Docker volumes (direct + tar fallback),
-DB dump import. Live-volume guard (CW-W-243): --verify never restores into
+DB dump import. Live-volume guard: --verify never restores into
 a real, potentially-live volume name, even on the same host the backup was
 taken from.
 """
@@ -76,7 +76,7 @@ def _restore_stack_files(backup_root: Path, restore_target: Path) -> None:
 
 
 def _bind_mount_live_sources() -> set[str]:
-    """CW-W-258 live-bind-mount guard: absolute host paths currently bind-
+    """Live-bind-mount guard: absolute host paths currently bind-
     mounted (Type "bind") into any RUNNING container. Docker's native
     `docker ps --filter volume=<name>` only resolves named volumes; bind
     mounts have no equivalent filter, so this inspects every running
@@ -103,7 +103,7 @@ def _bind_mount_live_sources() -> set[str]:
 def _resolve_bind_mount_target(
     orig_path: str, verify_only: bool, force_live: bool, live_sources: set[str],
 ) -> Path:
-    """CW-W-243-style guard, applied to bind mounts -- which have no
+    """Live-mount guard, as for volumes, applied to bind mounts -- which have no
     volume-name indirection to isolate behind, so the restore target IS the
     literal original absolute path. --verify always restores under a
     `_restoretest`-suffixed sibling path instead of the real one."""
@@ -124,12 +124,12 @@ def _resolve_bind_mount_target(
 def _restore_external_mounts(
     staging_dir: Path, backup_root: Path, meta: dict, verify_only: bool, force_live: bool,
 ) -> None:
-    """restore.sh:200-270. New format (meta.json `bind_mount_paths`, CW-W-258):
+    """restore.sh:200-270. New format (meta.json `bind_mount_paths`):
     restic already restored these directly under staging_dir at their
     original absolute path -- same lookup as _restore_volumes' direct-path
-    branch. Legacy format (pre-CW-W-258 snapshots, backup_root/
+    branch. Legacy format (backup_root/
     external-mounts/*.tar.gz) is still unpacked so old snapshots stay
-    restorable. Live-mount guard mirrors CW-W-243's volume guard: --verify
+    restorable. Live-mount guard mirrors the volume guard: --verify
     never writes into the real path; a genuine restore refuses to overwrite
     a path currently mounted by a running container unless --force-live."""
     bind_mount_paths: list[str] = meta.get("bind_mount_paths") or []
@@ -228,7 +228,7 @@ def _restore_volumes(
         real_vol_name = real_vol_name or f"{_project_name(restore_target)}_{vol_name}"
 
         if verify_only:
-            # CW-W-243: --verify must never write into the real, potentially-live
+            # --verify must never write into the real, potentially-live
             # volume — always restore under an isolated name instead.
             restore_vol_name = f"{real_vol_name}_restoretest"
         else:
@@ -285,7 +285,7 @@ def _restore_volumes(
     return restored
 
 
-# KEDGE-W-004: per-engine import implementations (_import_postgres et al.)
+# per-engine import implementations (_import_postgres et al.)
 # moved to kedge.engines, alongside their matching dump() -- one place per
 # engine instead of a hand-synced copy here. Derived straight from the
 # registry so a new engine's dump_suffix/import_ automatically participates,

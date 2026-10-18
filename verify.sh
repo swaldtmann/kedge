@@ -23,7 +23,7 @@
 #   HCLOUD_CONTEXT        hcloud CLI context (default: kigulls-test)
 #   HCLOUD_TOKEN          Alternative: API token directly
 #   VERIFY_SERVER_TYPE    Server type (default: cx43 — SYSTEM_PATHS restores
-#                         exceed cx23's 40GB disk, KEDGE-W-013 Bug 3)
+#                         exceed cx23's 40GB disk)
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
 #   SSH_KEY_NAME          SSH key in hcloud (default: stephan@waldtmann.de)
 #   RESTIC_SFTP_KEY       Private key for sftp: repositories — uploaded to the verify
@@ -63,7 +63,7 @@ KEEP_BOX=false
 
 SNAPSHOT_ID="${1:-latest}"
 VERIFY_PREFIX="kedge-verify"
-# Datum+Uhrzeit statt nur Uhrzeit (CW-W-296 Teil 2) -- zwei Laeufe zur selben
+# Datum+Uhrzeit statt nur Uhrzeit -- zwei Laeufe zur selben
 # Minute an verschiedenen Tagen kollidierten sonst im Box-Namen.
 BOX_NAME="${VERIFY_PREFIX}-$(date +%Y%m%d-%H%M)"
 BOX_IP=""
@@ -327,7 +327,7 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
     # the full "repo:tag" string -- app images tag their DB-flavor variant
     # into the tag itself (e.g. xwiki:16.9.0-mariadb-tomcat), which a
     # substring match against the full string false-positives as a MariaDB
-    # server (KEDGE-W-013 Bug 5: xwiki got probed with mariadb-admin and
+    # server (xwiki got probed with mariadb-admin and
     # "failed", even though the actual mariadb container was healthy).
     BASE_IMAGE="${IMAGE##*/}"
     BASE_IMAGE="${BASE_IMAGE%%:*}"
@@ -349,7 +349,7 @@ for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
         *mariadb*|*mysql*)
             ROOT_PASS=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" \
                 | grep -E '^(MYSQL|MARIADB)_ROOT_PASSWORD=' | head -1 | cut -d= -f2 || true)
-            # KEDGE-W-004: modern mariadb:11+ images only ship mariadb-admin, not
+            # modern mariadb:11+ images only ship mariadb-admin, not
             # mysqladmin -- same binary split already fixed in src/kedge/engines.py
             # and restore.sh's dump-import path.
             ADMIN_BIN=mysqladmin

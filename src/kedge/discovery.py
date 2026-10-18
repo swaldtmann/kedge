@@ -94,7 +94,7 @@ def discover_services(config: dict) -> list[tuple[str, str]]:
 
 def detect_db_type(image: str) -> str:
     """backup.sh:248-259 — match against the image name, tag stripped.
-    KEDGE-W-004: delegates to the DB engine registry (kedge.engines) instead
+    delegates to the DB engine registry (kedge.engines) instead
     of a locally-kept pattern list."""
     engine = engine_for_image(image)
     return engine.name if engine else ""

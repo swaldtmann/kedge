@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer restore.sh -- CW-W-243: --verify darf niemals in ein lebendes
+# Tests fuer restore.sh -- --verify darf niemals in ein lebendes
 # Docker-Volume schreiben, ein echter Restore ohne --force-live muss sich
 # weigern, ein bereits von einem laufenden Container gemountetes Volume zu
 # ueberschreiben.

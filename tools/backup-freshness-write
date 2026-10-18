@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# backup-freshness-write — optional BACKUP_POST_HOOK building block (DRAYVE-W-014)
+# backup-freshness-write — optional BACKUP_POST_HOOK building block
 #
 # Writes a Prometheus node-exporter textfile-collector metric after a
 # successful backup.sh run, so an alert rule like

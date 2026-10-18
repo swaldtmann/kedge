@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Tests fuer backup.sh -- CW-W-258: externe Bind-Mounts (Compose-Bind-Mounts
+# Tests fuer backup.sh -- externe Bind-Mounts (Compose-Bind-Mounts
 # ausserhalb $STACK_DIR) muessen als Direct-Path an restic gehen, nicht per
 # tar.gz. tar-dann-gzip zerstoert restics Content-Defined-Chunking (jede
-# Aenderung verschiebt alle nachfolgenden komprimierten Bytes) -- poki sicherte
+# Aenderung verschiebt alle nachfolgenden komprimierten Bytes) -- ein Mail-Mirror sicherte
 # so 18,6G taeglich neu (~6,1GiB "Added to the repository" JEDEN Tag), obwohl
 # nur eine Handvoll Dateien sich aenderten.
 #
@@ -81,7 +81,7 @@ _restored_files() {
   added_line="$(echo "$output" | grep 'Added to the repository:')"
   # "0 B" oder ein sehr kleiner Byte-Wert (Metadaten) -- kein Wieder-Speichern
   # des kompletten 15-Byte-Testinhalts als "neu" waere trivial klein sowieso;
-  # der eigentliche Beweis fuer echte Repos liegt im CW-W-258-Live-Beleg
+  # der eigentliche Beweis fuer echte Repos liegt im Live-Beleg
   # (tar|gzip vs. taegliches "Added"), hier pruefen wir nur die Code-Pfad-Wahl:
   # kein zweiter tar.gz-Aufruf, kein external-mounts-Verzeichnis im neuen Snapshot.
   snap="$(restic snapshots --latest 1 --json | jq -r '.[0].short_id')"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer backup.sh -- MySQL/MariaDB-Dump-Passwort-Discovery (KEDGE-W-002).
+# Tests fuer backup.sh -- MySQL/MariaDB-Dump-Passwort-Discovery.
 #
 # `docker`/`$COMPOSE_CMD` werden als Bash-Funktionen gemockt (kein echter
 # Container noetig) -- der Bug lebt in backup.shs eigener Env-Var-Erkennung +
@@ -54,7 +54,7 @@ setup() {
   }
 }
 
-@test "KEDGE-W-002: Passwort ueber Standard-Var (MYSQL_ROOT_PASSWORD) gefunden -> Dump laeuft durch" {
+@test "Passwort ueber Standard-Var (MYSQL_ROOT_PASSWORD) gefunden -> Dump laeuft durch" {
   MOCK_ENV=("MYSQL_ROOT_PASSWORD=geheim123")
   run run_pre_hooks "$(config_json mariadb:11)" "$DUMP_DIR"
   [ "$status" -eq 0 ]
@@ -62,7 +62,7 @@ setup() {
   [ -f "$DUMP_DIR/db_mysql.sql.gz" ]
 }
 
-@test "KEDGE-W-002: Passwort ueber Mailcow-Var DBROOT gefunden -> Dump laeuft durch (vorher: silent unauthenticated dump)" {
+@test "Passwort ueber Mailcow-Var DBROOT gefunden -> Dump laeuft durch (vorher: silent unauthenticated dump)" {
   MOCK_ENV=("DBROOT=mailcow-geheim")
   run run_pre_hooks "$(config_json mariadb:10.6)" "$DUMP_DIR"
   [ "$status" -eq 0 ]
@@ -70,7 +70,7 @@ setup() {
   [ -f "$DUMP_DIR/db_mysql.sql.gz" ]
 }
 
-@test "KEDGE-W-002: keine bekannte Passwort-Var gefunden -> harter Fehlschlag, kein 'ok'-Log, kein leerer Dump" {
+@test "keine bekannte Passwort-Var gefunden -> harter Fehlschlag, kein 'ok'-Log, kein leerer Dump" {
   MOCK_ENV=("SOME_OTHER_VAR=unrelated" "DB_NAME=mailcow")
   run run_pre_hooks "$(config_json mariadb:11)" "$DUMP_DIR"
   [ "$status" -ne 0 ]
@@ -80,7 +80,7 @@ setup() {
   [ ! -f "$DUMP_DIR/db_mysql.sql.gz" ]
 }
 
-@test "KEDGE-W-002: Passwort gefunden, aber mysqldump selbst schlaegt fehl -> harter Fehlschlag statt 'ok'" {
+@test "Passwort gefunden, aber mysqldump selbst schlaegt fehl -> harter Fehlschlag statt 'ok'" {
   MOCK_ENV=("MYSQL_ROOT_PASSWORD=geheim123")
   MOCK_DUMP_EXIT=1
   run run_pre_hooks "$(config_json mariadb:11)" "$DUMP_DIR"

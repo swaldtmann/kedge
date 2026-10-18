@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer tools/backup-freshness-write (DRAYVE-W-014).
+# Tests fuer tools/backup-freshness-write.
 
 setup() {
   SCRIPT="${BATS_TEST_DIRNAME}/../tools/backup-freshness-write"

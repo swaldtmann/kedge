@@ -202,7 +202,7 @@ cmd_restore() {
     local bind_mount_paths_json bind_mount_count=0
     bind_mount_paths_json="$(jq -r '.bind_mount_paths // [] | .[]' "$backup_root/meta.json" 2>/dev/null || true)"
 
-    # CW-W-243-style live-mount guard, applied to bind mounts: they have no
+    # live-mount guard (as for volumes), applied to bind mounts: they have no
     # volume-name indirection to isolate behind (the restore target IS the
     # literal original absolute path), so this checks every RUNNING
     # container's bind-mount Sources directly -- docker's native `--filter
@@ -222,7 +222,7 @@ cmd_restore() {
         while IFS= read -r orig_path; do
             [[ -z "$orig_path" ]] && continue
             bind_mount_count=$((bind_mount_count + 1))
-            # CW-W-258 fix: restic backed this up directly (no tar.gz), same
+            # Fix: restic backed this up directly (no tar.gz), same
             # as a direct-path Docker volume -- find it under STAGING_DIR at
             # its original absolute path, same lookup collect_volumes' direct
             # branch already uses for volumes.
@@ -257,7 +257,7 @@ cmd_restore() {
         done <<< "$bind_mount_paths_json"
     fi
 
-    # Legacy format (pre-CW-W-258 snapshots): tar.gz archives under
+    # Legacy format (legacy-format snapshots): tar.gz archives under
     # backup_root/external-mounts/ -- kept so old snapshots stay restorable.
     if [[ -d "$backup_root/external-mounts" ]]; then
         for archive in "$backup_root/external-mounts/"*.tar.gz; do
@@ -319,7 +319,7 @@ cmd_restore() {
             real_vol_name="${project_name}_${vol_name}"
         fi
 
-        # CW-W-243: --verify must never write into the real, potentially-live
+        # --verify must never write into the real, potentially-live
         # volume — meta.json's vol_mapping says nothing about whether this
         # host IS the backup source, so a --verify restore on the same host
         # as the backup used to land straight in the live volume's mountpoint.
@@ -470,7 +470,7 @@ cmd_restore() {
                             if [[ -n "$mysql_pass" ]]; then
                                 mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
                             fi
-                            # KEDGE-W-004: modern mariadb:11+ images only ship mariadb/mariadb-admin,
+                            # modern mariadb:11+ images only ship mariadb/mariadb-admin,
                             # not mysql/mysqladmin -- same binary split already fixed in
                             # src/kedge/engines.py, restore.sh had the identical gap (silently
                             # swallowed by the `|| warn` below, leaving the app DB never imported).
@@ -569,9 +569,9 @@ Example (bare-metal VPS restore):
   apt-get update && apt-get install -y docker.io restic jq
 
   # Set credentials
-  export RESTIC_REPOSITORY=sftp:backup@storage:/kigulls-kunde01
+  export RESTIC_REPOSITORY=sftp:backup@storage:/customer01
   export RESTIC_PASSWORD=\$(cat /etc/backup-password)
-  export RESTORE_TARGET=/opt/kigulls
+  export RESTORE_TARGET=/opt/stack
 
   # Restore
   $(basename "$0") --list              # Pick a snapshot

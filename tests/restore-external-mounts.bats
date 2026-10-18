@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer restore.sh -- CW-W-258: externe Bind-Mounts, die backup.sh jetzt
+# Tests fuer restore.sh -- externe Bind-Mounts, die backup.sh jetzt
 # als Direct-Path sichert (statt tar.gz), muessen beim Restore wieder an ihrem
 # urspruenglichen absoluten Pfad landen -- UND alte, noch tar.gz-basierte
 # Snapshots (vor dem Fix) muessen weiterhin restorable bleiben.
@@ -39,7 +39,7 @@ EOF
 
   restic backup "$BACKUP_SRC" "$MOUNT_SRC_DIR" --tag kedge >/dev/null
 
-  # CW-W-243-Guard: --verify darf NIE in den echten, potenziell lebenden Pfad
+  # Live-mount guard: --verify darf NIE in den echten, potenziell lebenden Pfad
   # schreiben -- den Original-Inhalt hier stehen lassen (nicht loeschen wie im
   # disaster-recovery-Test) macht genau das pruefbar: bleibt er unangetastet?
   ORIGINAL_CONTENT="$(cat "$MOUNT_SRC_DIR/msg1.eml")"
@@ -162,7 +162,7 @@ EOF
   [ "$(cat "$MOUNT_SRC_DIR/msg1.eml")" = "restored-mail-content" ]
 }
 
-@test "Legacy-Format (external-mounts/*.tar.gz, pre-CW-W-258): --verify restauriert isoliert" {
+@test "Legacy-Format (external-mounts/*.tar.gz, aelteres Format): --verify restauriert isoliert" {
   BACKUP_SRC="${BATS_TEST_TMPDIR}/backup-src"
   MOUNT_SRC_DIR="${BATS_TEST_TMPDIR}/legacy-mount"
   mkdir -p "$BACKUP_SRC/staging/$STACK/external-mounts" "$MOUNT_SRC_DIR"

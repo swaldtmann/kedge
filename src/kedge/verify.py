@@ -134,21 +134,21 @@ echo "FAILURES=$FAILURES"
 echo "CONTAINERS=$CONTAINERS_RUNNING/$CONTAINERS_TOTAL"
 """
 
-# KEDGE-W-004: the `case "$IMAGE" in ... esac` DB-connectivity arms are built
+# the `case "$IMAGE" in ... esac` DB-connectivity arms are built
 # from the DB engine registry (kedge.engines) instead of being hand-written
 # here — a plain string .replace(), not .format(): the script is full of
 # bash ${...}/$(...) syntax that a real .format() call would choke on.
 _HEALTHCHECK_SCRIPT = _HEALTHCHECK_SCRIPT_HEAD.replace("{db_case_block}", build_healthcheck_case_block())
 
 
-# Defaults aktualisiert 2026-07-26 (KEDGE-W-003 Live-Blocker): die alte Kette
+# Defaults aktualisiert 2026-07-26: die alte Kette
 # cpx23/cpx21/cax11 ist bei Hetzner im Zuge der "Standardisierung und
 # Preisanpassung" 2026 fuer Neubestellungen komplett zurueckgezogen (an nbg1/
 # fsn1/hel1 alle "Available: no"). Aktuell neu-erstellbar + x86 + guenstig:
 # cx23 nur an hel1 (EUR 0.0088/h, 2 vCPU/4 GB) als Default, cpx22/cpx12 als
 # ueberall verfuegbare Fallbacks. Default-Location deshalb hel1 (dort ist cx23
-# verfuegbar). Default-Kontext kigulls-test existiert nicht mehr (2026-07-26
-# geloescht) -> greenfields (Wegwerfbox-Kontext, Byrd-CLAUDE.md-Konvention).
+# verfuegbar). Der fruehere Default-Kontext existiert nicht mehr (2026-07-26
+# geloescht) -> greenfields (Wegwerfbox-Kontext).
 DEFAULT_CONTEXT = "greenfields"
 DEFAULT_SERVER_TYPE = "cx23"
 DEFAULT_LOCATION = "hel1"

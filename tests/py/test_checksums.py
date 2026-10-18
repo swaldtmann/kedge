@@ -1,4 +1,4 @@
-"""Unit tests for kedge.checksums — KEDGE-W-003 #3 (roadmap issue #1)."""
+"""Unit tests for kedge.checksums."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """Unit tests for kedge.docker_stack — stop/start stack lifecycle, plus the
-generic docker exec/cp helpers used by kedge.engines (KEDGE-W-004)."""
+generic docker exec/cp helpers used by kedge.engines."""
 
 import subprocess
 
@@ -120,7 +120,7 @@ def test_cmd_args_invalid_json_returns_empty_list(monkeypatch):
     assert cmd_args("c-cache") == []
 
 
-# --- copy_from_container / copy_to_container (KEDGE-W-004, InfluxDB) ----------
+# --- copy_from_container / copy_to_container (InfluxDB) ----------
 
 def test_copy_from_container_success(monkeypatch, tmp_path):
     captured = {}

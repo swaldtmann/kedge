@@ -1,4 +1,4 @@
-"""Checksum verify — KEDGE-W-003 #3 (roadmap issue #1), never built in v0.3.x.
+"""Checksum verify, never built in v0.3.x.
 
 Backup side computes a content fingerprint per volume/dump right after
 collect_volumes/run_pre_hooks stage the data, stored in meta.json under

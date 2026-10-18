@@ -3,7 +3,7 @@ secrets/
 .env.local
 .env.production
 
-# Python (KEDGE-W-001)
+# Python
 .venv-dev/
 dist/
 build/

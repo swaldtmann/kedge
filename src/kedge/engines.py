@@ -1,8 +1,8 @@
-"""DB engine registry (KEDGE-W-004) — one descriptor per database engine,
+"""DB engine registry — one descriptor per database engine,
 consumed by discovery.py/hooks.py/restore.py/verify.py instead of each
 keeping its own hand-synced copy of "which DB types exist".
 
-Anlass: the MariaDB bug from KEDGE-W-003 (modern mariadb:11+ images only ship
+Anlass: the MariaDB bug from the registry port (modern mariadb:11+ images only ship
 `mariadb`/`mariadb-admin`, not `mysql`/`mysqladmin`) wasn't a point bug — the
 same DB type was defined at four separate places (discovery pattern, dump
 hook, restore import, verify healthcheck), two of which (import, healthcheck)
@@ -158,7 +158,7 @@ def import_mysql(compose_cmd: list, restore_target: Path, dump_path: Path, svc: 
         return
     env = docker_stack.container_env(container)
     mysql_pass = env.get("MYSQL_ROOT_PASSWORD") or env.get("MARIADB_ROOT_PASSWORD") or ""
-    # KEDGE-W-004: modern mariadb:11+ images only ship mariadb/mariadb-admin, not
+    # modern mariadb:11+ images only ship mariadb/mariadb-admin, not
     # mysql/mysqladmin -- the exact same binary split dump_mysql() above already
     # handles, but restore's import (and verify's healthcheck) had never picked
     # it up. Probe once, use consistently for both the readiness poll and the
@@ -220,7 +220,7 @@ def _discover_valkey_password(container: str) -> str:
     if password:
         return password
 
-    # AFKI-W-047: mounted password file (preferred pattern)
+    # mounted password file (preferred pattern)
     secret = docker_stack.exec_output(container, ["cat", "/run/secrets/valkey_password"]).strip()
     if secret:
         return secret
@@ -340,7 +340,7 @@ MONGO = DBEngine(
 
 # --- InfluxDB --------------------------------------------------------------
 #
-# Real fleet case: prod-multi01 runs influxdb 2.6 (cowork/servers.yaml,
+# Real fleet case: a production fleet runs influxdb 2.6 (
 # verified 2026-07-26) -- v2 is the primary, fully-supported target. v1 is
 # only DETECTED (image tag major version) so a v1 image gets a clear "not
 # supported" error at import time instead of a silent wrong command; v1 OSS
@@ -455,8 +455,8 @@ INFLUXDB = DBEngine(
 
 # --- SQLite ------------------------------------------------------------------
 #
-# Real fleet case: prod-poki (/var/poki/db, WAL mode, bind-mount). SQLite is
-# an embedded library inside poki's own app image, not a container of its
+# Real fleet case: an app with /var/app/db (WAL mode, bind-mount). SQLite is
+# an embedded library inside the application's own image, not a container of its
 # own -- there is no image to auto-discover a "sqlite" service from, so this
 # engine deliberately has no image_patterns and never participates in
 # discovery.detect_db_type()/hooks.run_pre_hooks()'s per-service loop. It has

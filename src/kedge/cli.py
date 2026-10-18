@@ -1,7 +1,7 @@
 """kedge CLI — click-based entry point.
 
 Command set mirrors backup.sh/restore.sh/verify.sh 1:1 (drop-in replacement
-goal). `kedge restore` is the KEDGE-W-003 (Phase 2) port of restore.sh.
+goal). `kedge restore` is the Phase 2 port of restore.sh.
 """
 
 from __future__ import annotations

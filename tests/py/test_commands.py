@@ -130,14 +130,14 @@ def _stub_happy_path(monkeypatch):
 
 
 def test_cmd_backup_passes_bind_mount_paths_to_restic(monkeypatch, tmp_path):
-    """CW-W-258: collect_stack_files' direct bind-mount paths must reach
+    """collect_stack_files' direct bind-mount paths must reach
     restic.backup's path list — that's the actual fix (no more tar.gz
     staging for external mounts, so they only get backed up if they flow
     through here)."""
     (tmp_path / "docker-compose.yml").write_text("services: {}\n")
     _stub_happy_path(monkeypatch)
     monkeypatch.setattr(
-        commands, "collect_stack_files", lambda *a, **kw: ["/var/poki/mirror", "/var/poki/db"]
+        commands, "collect_stack_files", lambda *a, **kw: ["/var/app/mirror", "/var/app/db"]
     )
 
     captured = {}
@@ -148,13 +148,13 @@ def test_cmd_backup_passes_bind_mount_paths_to_restic(monkeypatch, tmp_path):
 
     commands.cmd_backup(_cfg(tmp_path))
 
-    assert "/var/poki/mirror" in captured["paths"]
-    assert "/var/poki/db" in captured["paths"]
+    assert "/var/app/mirror" in captured["paths"]
+    assert "/var/app/db" in captured["paths"]
 
 
-# KEDGE-W-007: SYSTEM_PATHS_EXCLUDE is passed to restic for the whole backup
+# SYSTEM_PATHS_EXCLUDE is passed to restic for the whole backup
 # invocation, not scoped to SYSTEM_PATHS -- an exclude entry that also matches
-# an explicit volume/staging backup path must not shadow it (prod-cloud,
+# an explicit volume/staging backup path must not shadow it (production host,
 # 2026-07-27/28: "/var/lib/docker/volumes" in SYSTEM_PATHS_EXCLUDE silently
 # emptied every Docker volume backup).
 def test_filter_shadowing_excludes_drops_overlap_with_backup_path():

@@ -1,7 +1,7 @@
 """DB pre-hooks — dump running database containers before backup.
 Port of backup.sh:373-500 (run_pre_hooks + per-type dump logic).
 
-KEDGE-W-004: the per-engine dump implementations (_dump_postgres et al.)
+the per-engine dump implementations (_dump_postgres et al.)
 moved to kedge.engines — this module is now just the generic "loop over
 discovered services, call the matching engine's dump()" dispatcher, driven
 by the DB engine registry instead of an if/elif chain hand-synced with

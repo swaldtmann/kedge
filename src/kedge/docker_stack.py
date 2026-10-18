@@ -2,7 +2,7 @@
 
 Also home of the generic (engine-agnostic) `docker exec`/`docker cp` helpers
 used by kedge.engines' per-DB-engine dump/import implementations — these were
-previously duplicated between hooks.py and restore.py (KEDGE-W-004)."""
+previously duplicated between hooks.py and restore.py."""
 
 from __future__ import annotations
 

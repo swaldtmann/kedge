@@ -90,8 +90,8 @@ def collect_stack_files(stack_dir: Path, config: dict, target_dir: Path, exclude
     that would justify tar.gz. Tar-then-gzip defeated restic's
     content-defined chunking: any change anywhere in the source shifts every
     downstream compressed byte, so the whole archive re-stored as "new" on
-    every single backup regardless of how little actually changed (CW-W-258:
-    poki's /var/poki/mirror, 18.6G, produced ~6.1GiB of "Added to the
+    every single backup regardless of how little actually changed (
+    a mail mirror at /var/app/mirror, 18.6G, produced ~6.1GiB of "Added to the
     repository" on every daily run for weeks)."""
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -147,7 +147,7 @@ def write_metadata(
     stack_dir: Path, config: dict, compose_cmd: list[str], target: Path,
     checksums: dict | None = None, bind_mount_paths: list[str] | None = None,
 ) -> None:
-    """backup.sh:651-696. `checksums` (KEDGE-W-003 #3) is a Python-only
+    """backup.sh:651-696. `checksums`  is a Python-only
     addition on top of the shell format — meta.json produced by backup.sh
     simply lacks the key, which restore treats as "nothing to verify"."""
     hostname_str = hostname()

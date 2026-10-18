@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer backup.sh -- SYSTEM_PATHS / SYSTEM_PATHS_EXCLUDE (AFKI-W-157 Vorbereitung).
+# Tests fuer backup.sh -- SYSTEM_PATHS / SYSTEM_PATHS_EXCLUDE.
 #
 # Echter lokaler restic-Repo (kein Argv-Mock), analog backup-prune.bats: der Beweis
 # ist, dass restic die zusaetzlichen Pfade tatsaechlich im Snapshot hat -- nicht nur
@@ -94,12 +94,12 @@ _restored_files() {
   [[ "$output" == *"--- System Paths ---"*"(none configured)"* ]]
 }
 
-# KEDGE-W-007: SYSTEM_PATHS_EXCLUDE is applied restic-wide, not scoped to
+# SYSTEM_PATHS_EXCLUDE is applied restic-wide, not scoped to
 # SYSTEM_PATHS -- an exclude entry that is also a prefix of an explicit
 # VOLUME_BACKUP_PATHS entry must not shadow it, or every Docker volume backup
-# silently comes back empty (prod-cloud, 2026-07-27 to 2026-07-28: all 14
+# silently comes back empty (production host, 2026-07-27 to 2026-07-28: all 14
 # volumes affected, "/var/lib/docker/volumes" in SYSTEM_PATHS_EXCLUDE).
-@test "SYSTEM_PATHS_EXCLUDE darf einen expliziten Docker-Volume-Pfad nicht schatten (KEDGE-W-007)" {
+@test "SYSTEM_PATHS_EXCLUDE darf einen expliziten Docker-Volume-Pfad nicht schatten" {
   VOL_DIR="${BATS_TEST_TMPDIR}/var-lib-docker-volumes/xwiki_nextcloud_base/_data"
   mkdir -p "$VOL_DIR"
   echo "real-nextcloud-config-content" > "$VOL_DIR/config.php"

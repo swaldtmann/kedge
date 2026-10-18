@@ -410,7 +410,7 @@ run_pre_hooks() {
             mysql)
                 info "Dumping MySQL/MariaDB ($container_name)..."
                 # Extract password from container env — pass via MYSQL_PWD env var (not CLI arg)
-                # KEDGE-W-002: DBROOT ergaenzt (Mailcow-Konvention, weicht vom
+                # DBROOT ergaenzt (Mailcow-Konvention, weicht vom
                 # MYSQL_ROOT_PASSWORD/MARIADB_ROOT_PASSWORD-Standard ab). Ein
                 # Stack mit einer weiteren untypischen Var fuehrte vorher zu
                 # einem STILLEN, unauthentifizierten Dump-Versuch statt einem
@@ -429,11 +429,11 @@ run_pre_hooks() {
                     dump_cmd="mariadb-dump"
                 fi
                 # --single-transaction: MVCC-consistent dump on InnoDB without holding
-                # a global read lock (borgmatic used the same flag on prod-cloud).
+                # a global read lock (borgmatic used the same flag on a production host).
                 # No-op/ignored for MyISAM tables, same as upstream mysqldump behavior.
                 docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases --single-transaction -uroot 2>/dev/null \
                     | gzip > "$dump_dir/${svc}_mysql.sql.gz"
-                # KEDGE-W-002: expliziter Exit-Code-Check statt sich auf `set -e`
+                # expliziter Exit-Code-Check statt sich auf `set -e`
                 # + pipefail durch den docker-exec|gzip-Pipe zu verlassen -- ein
                 # fehlgeschlagener Dump (falsches Passwort, Container-Problem)
                 # wurde vorher trotzdem unbedingt als "ok" geloggt.
@@ -451,7 +451,7 @@ run_pre_hooks() {
                 vk_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
                     | grep -E '^(VALKEY_PASSWORD|REDIS_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
                 if [[ -z "$vk_pass" ]]; then
-                    # AFKI-W-047: mounted password file (preferred pattern — not in .Config.Cmd)
+                    # mounted password file (preferred pattern — not in .Config.Cmd)
                     vk_pass="$(docker exec "$container" cat /run/secrets/valkey_password 2>/dev/null || true)"
                 fi
                 if [[ -z "$vk_pass" ]]; then
@@ -635,7 +635,7 @@ collect_stack_files() {
     # restic's content-defined chunking: any change anywhere in the source
     # shifts every downstream compressed byte, so the whole archive re-stored
     # as "new" on every single backup regardless of how little actually
-    # changed (CW-W-258: poki's /var/poki/mirror, 18.6G, produced ~6.1GiB of
+    # changed (a mail mirror at /var/app/mirror, 18.6G, produced ~6.1GiB of
     # "Added to the repository" on every daily run for weeks).
     for mount in "${external_mounts[@]}"; do
         if [[ -S "$mount" ]]; then
@@ -952,8 +952,8 @@ cmd_backup() {
     # to SYSTEM_PATHS — an exclude entry that is a prefix of (or equal to) an
     # explicit backup_paths entry (staging dir, direct volume paths) would silently
     # nuke that deliberate backup target too. Drop those before passing to restic
-    # (KEDGE-W-007: this exact collision emptied every Docker volume backup on
-    # prod-cloud since the SYSTEM_PATHS_EXCLUDE entry "/var/lib/docker/volumes"
+    # (this exact collision emptied every Docker volume backup on
+    # a production host since the SYSTEM_PATHS_EXCLUDE entry "/var/lib/docker/volumes"
     # shadowed every VOLUME_BACKUP_PATHS entry).
     local restic_excludes=()
     for excl in $SYSTEM_PATHS_EXCLUDE; do
@@ -1002,7 +1002,7 @@ cmd_backup() {
     BACKUP_HOSTNAME="$hostname_str"
     BACKUP_STACK="$(basename "$STACK_DIR")"
     BACKUP_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    # EWH-W-135 stats-Nebenbefund: `restic stats` re-walks the whole repo just for this
+    # `restic stats` re-walks the whole repo just for this
     # log line — slow and lock-holding on big/SFTP repos. `restic backup` already prints
     # "Added to the repository: X (Y stored)" as part of its own summary, so reuse that
     # instead of a second full-repo scan.
@@ -1035,7 +1035,7 @@ cmd_check() {
 cmd_prune() {
     check_prereqs
     info "Pruning old snapshots (keep: ${BACKUP_KEEP_DAILY}d ${BACKUP_KEEP_WEEKLY}w ${BACKUP_KEEP_MONTHLY}m)..."
-    # --group-by tags (EWH-W-135): restic's default group-by is host,paths. Before #18
+    # --group-by tags: restic's default group-by is host,paths. Before #18
     # (stable staging path), every run's paths list contained a unique per-run mktemp
     # staging dir, so each snapshot was its own group of one and keep-daily/weekly/monthly
     # never dropped anything. Tags are stable across runs (always "kedge" + "stack:<name>"),

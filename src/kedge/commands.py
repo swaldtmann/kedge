@@ -34,7 +34,7 @@ def _filter_shadowing_excludes(backup_paths: list, excludes: list[str]) -> list[
     globally to the whole invocation, not scoped to SYSTEM_PATHS — an exclude
     meant only to keep the broad SYSTEM_PATHS scan from re-descending into
     paths handled elsewhere would otherwise silently empty those deliberate
-    backup targets too (KEDGE-W-007: "/var/lib/docker/volumes" in
+    backup targets too ("/var/lib/docker/volumes" in
     SYSTEM_PATHS_EXCLUDE shadowed every direct Docker volume backup path)."""
     paths_str = [str(p) for p in backup_paths]
     kept = []
@@ -111,10 +111,10 @@ def cmd_backup(cfg: Config) -> None:
         run_pre_hooks(config, cfg.stack_dir, prereqs.compose_cmd, staging_dir / "dumps")
 
         if cfg.sqlite_wal_checkpoint_paths:
-            # KEDGE-W-004: SQLite (e.g. prod-poki) has no container image to
+            # SQLite (e.g. an app's /var/app/db) has no container image to
             # auto-discover a dump hook for -- its bind-mount already gets
             # backed up directly like any other external mount (collect.py,
-            # CW-W-258), this just makes the plain .db file in that mount
+            # above), this just makes the plain .db file in that mount
             # self-consistent first.
             log.info("--- Phase 1b: SQLite WAL checkpoints ---")
             checkpoint_wal_paths(cfg.sqlite_wal_checkpoint_paths)

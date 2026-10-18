@@ -3,7 +3,7 @@
 version). `socket.getfqdn()` is NOT a substitute — it does its own reverse-DNS
 based canonicalization and can return garbage (e.g. an IPv6 loopback PTR
 record) on hosts where `hostname -f` returns a clean name. Found via the
-KEDGE-W-001 shell/python A-B comparison, not a theoretical concern.
+shell/python A-B comparison, not a theoretical concern.
 """
 
 from __future__ import annotations

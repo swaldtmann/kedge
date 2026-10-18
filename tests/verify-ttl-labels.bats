@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# Tests fuer verify.sh -- TTL-Labels + kollisionsfreier Box-Name (CW-W-296 Teil 2).
-# Anlass: Beifund aus der CW-W-295-Diagnose (kedge-verify-1600 lief ~1 Monat
+# Tests fuer verify.sh -- TTL-Labels + kollisionsfreier Box-Name.
+# Anlass: Beifund aus einer Diagnose (kedge-verify-1600 lief ~1 Monat
 # unbemerkt weiter). create_box() bekommt class=ephemeral + ttl=<heute+1d>
-# Labels, damit der Hausmeister-Sweep (CW-W-296 Teil 1) verwaiste Boxen fangen
+# Labels, damit der Hausmeister-Sweep verwaiste Boxen fangen
 # kann. BOX_NAME wechselt von reiner Uhrzeit (kollidiert ueber Tage) auf
 # Datum+Uhrzeit.
 

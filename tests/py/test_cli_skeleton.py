@@ -25,7 +25,7 @@ def test_version_flag():
 
 
 def test_restore_without_restic_env_fails_cleanly():
-    """restore is ported (KEDGE-W-003) — invoking it without RESTIC_* env
+    """restore is ported — invoking it without RESTIC_* env
     now fails the same way every other command does (KedgeError -> exit 1),
     not with a NotImplementedError placeholder."""
     result = CliRunner().invoke(main, ["restore"], env={"RESTIC_REPOSITORY": "", "RESTIC_PASSWORD": ""})

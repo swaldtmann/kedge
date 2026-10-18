@@ -40,7 +40,7 @@ def backup(cfg: Config, paths: list, excludes: list[str], tags: list[str], host:
     """Runs `restic backup`, streaming its output live like the shell version,
     while also capturing it to parse the "Added to the repository: X (Y stored)"
     summary line restic already prints — avoids a second full-repo `stats` scan
-    just for that size figure (EWH-W-135 stats-Nebenbefund). Returns the parsed
+    just for that size figure (restic stats). Returns the parsed
     size, or "unknown" if the line wasn't found."""
     cmd = ["restic", "backup", *[str(p) for p in paths]]
     for excl in excludes:
@@ -106,7 +106,7 @@ def check(cfg: Config) -> None:
 
 
 def prune(cfg: Config, keep_daily: int, keep_weekly: int, keep_monthly: int) -> None:
-    # --group-by tags (EWH-W-135): restic's default group-by is host,paths.
+    # --group-by tags: restic's default group-by is host,paths.
     # Tags are stable across runs ("kedge" + "stack:<name>"), grouping by
     # them keeps forget effective even if the staging path ever drifts.
     result = subprocess.run(

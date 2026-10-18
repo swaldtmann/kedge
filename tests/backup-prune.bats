@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests fuer backup.sh -- Fokus: cmd_prune --group-by-Fix (EWH-W-135).
+# Tests fuer backup.sh -- Fokus: cmd_prune --group-by-Fix.
 #
 # Nutzt einen echten lokalen restic-Repo (kein Mock) -- reine Argv-Mocks wuerden
 # nur beweisen dass wir den Flag-String selbst hingeschrieben haben, nicht dass
@@ -47,7 +47,7 @@ _backup_unique_path() {
   # UND NUR WEIL --group-by tags alle drei als EINE Gruppe behandelt. Ohne den
   # Fix waere jeder sein eigenes Grueppchen von 1 (Default-Gruppierung
   # host+paths, Pfade sind hier bewusst unterschiedlich) -> after waere
-  # weiterhin 3, der exakte Ur-Bug aus EWH-W-135 ("Prune complete", 0 geloescht).
+  # weiterhin 3, der exakte Ur-Bug ("Prune complete", 0 geloescht).
   [ "$after" -eq 2 ]
 }
 
@@ -70,7 +70,7 @@ _backup_unique_path() {
   before="$(restic snapshots --tag kedge --json | jq 'length')"
   [ "$before" -eq 3 ]
 
-  # Exakt der Aufruf aus cmd_prune VOR dem EWH-W-135-Fix -- Default-Gruppierung
+  # Exakt der Aufruf aus cmd_prune VOR dem Fix -- Default-Gruppierung
   # (host,paths), jeder Snapshot hat einen eigenen Pfad -> jeder ist seine
   # eigene Gruppe von 1 -> keep-daily 7 haelt jede Ein-Snapshot-Gruppe komplett.
   run restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --tag kedge --prune

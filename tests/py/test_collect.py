@@ -88,7 +88,7 @@ def test_collect_stack_files_copies_compose_and_env(monkeypatch, tmp_path):
 
 
 def test_collect_stack_files_external_mount_direct_path(monkeypatch, tmp_path):
-    """CW-W-258: external bind mounts must go to restic as a direct path
+    """external bind mounts must go to restic as a direct path
     (block-level dedup), never through tar.gz — tar-then-gzip defeats
     restic's content-defined chunking (any change shifts every downstream
     compressed byte), so the whole mount re-stores as "new" on every single
@@ -219,8 +219,8 @@ def test_write_metadata_bind_mount_paths(monkeypatch, tmp_path):
 
     write_metadata(
         stack_dir, {"volumes": {}, "services": {}}, ["docker", "compose"], target,
-        bind_mount_paths=["/var/poki/mirror", "/var/poki/db"],
+        bind_mount_paths=["/var/app/mirror", "/var/app/db"],
     )
 
     meta = json.loads((target / "meta.json").read_text())
-    assert meta["bind_mount_paths"] == ["/var/poki/mirror", "/var/poki/db"]
+    assert meta["bind_mount_paths"] == ["/var/app/mirror", "/var/app/db"]

@@ -1,4 +1,4 @@
-"""Unit tests for kedge.engines — the DB engine registry (KEDGE-W-004).
+"""Unit tests for kedge.engines — the DB engine registry.
 
 Dump/import tests for postgres/mysql/valkey/mongo moved here from
 test_hooks.py/test_restore.py along with the functions themselves (one owner
@@ -96,7 +96,7 @@ def test_import_postgres_success(monkeypatch, tmp_path):
 
     assert "-U" in captured["cmd"] and "admin" in captured["cmd"]
     # -d postgres (maintenance DB, always exists) — regression guard for the
-    # silent dump-only data loss found in the live verify roundtrip (CW-W-003).
+    # silent dump-only data loss found in the live verify roundtrip.
     assert captured["cmd"][captured["cmd"].index("-d") + 1] == "postgres"
 
 
@@ -108,7 +108,7 @@ def test_import_postgres_no_container_warns_and_skips(monkeypatch, tmp_path):
     assert calls == []
 
 
-# --- mysql / mariadb — the KEDGE-W-004 regression -------------------------------
+# --- mysql / mariadb — regression -------------------------------
 
 def test_dump_mysql_no_password_hard_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(docker_stack, "container_env", lambda c: {})
@@ -117,7 +117,7 @@ def test_dump_mysql_no_password_hard_fails(monkeypatch, tmp_path):
 
 
 def test_import_mysql_falls_back_to_mariadb_binaries_when_mysql_absent(monkeypatch, tmp_path):
-    """KEDGE-W-004 regression: a mariadb:11+ image has NO mysql/mysqladmin at
+    """Regression: a mariadb:11+ image has NO mysql/mysqladmin at
     all -- import must probe for and use mariadb-admin/mariadb, exactly like
     dump_mysql already did (hooks.py had the fallback, restore's import and
     verify's healthcheck never picked it up)."""
@@ -236,19 +236,19 @@ def test_import_mongo_streams_raw_archive(monkeypatch, tmp_path):
     assert captured["stdin_bytes"] == b"BSON archive bytes"
 
 
-# --- SQLite (KEDGE-W-004 new engine) — real local sqlite3, no mocks ------------
+# --- SQLite (new engine) — real local sqlite3, no mocks ------------
 
 def _wal_path(db_path):
     return db_path.parent / (db_path.name + "-wal")
 
 
 def test_checkpoint_wal_truncates_and_makes_main_file_self_consistent(tmp_path):
-    """Real WAL-mode SQLite (poki-like): write + commit while a second
+    """Real WAL-mode SQLite (app-like): write + commit while a second
     connection stays open (so SQLite's own auto-checkpoint never fires),
     checkpoint via a fresh connection like production code does, then prove
     the PLAIN .db file alone (no -wal/-shm) already has the data -- that is
     the entire point of WAL_CHECKPOINT(TRUNCATE) before a bind-mount tar."""
-    db_path = tmp_path / "poki.db"
+    db_path = tmp_path / "app.db"
     keep_open = sqlite3.connect(str(db_path))
     keep_open.execute("PRAGMA journal_mode=WAL")
     keep_open.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
@@ -277,7 +277,7 @@ def test_checkpoint_wal_busy_is_non_fatal(tmp_path):
     """A concurrent writer holding the WAL lock must not raise -- the caller
     just backs up the -wal/-shm sidecar files alongside the main file
     instead of a fully truncated one."""
-    db_path = tmp_path / "poki.db"
+    db_path = tmp_path / "app.db"
     writer = sqlite3.connect(str(db_path))
     writer.execute("PRAGMA journal_mode=WAL")
     writer.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
@@ -303,7 +303,7 @@ def test_checkpoint_wal_paths_warns_on_non_sqlite_file_without_raising(tmp_path,
 
 
 def test_checkpoint_wal_paths_ok_path_logs_ok(tmp_path, capsys):
-    db_path = tmp_path / "poki.db"
+    db_path = tmp_path / "app.db"
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
@@ -311,7 +311,7 @@ def test_checkpoint_wal_paths_ok_path_logs_ok(tmp_path, capsys):
     conn.close()
 
     engines.checkpoint_wal_paths([str(db_path)])
-    assert "SQLite WAL checkpoint: poki.db" in capsys.readouterr().out
+    assert "SQLite WAL checkpoint: app.db" in capsys.readouterr().out
 
 
 def test_sqlite_engine_has_no_image_patterns_never_auto_discovered():
@@ -325,9 +325,9 @@ def test_sqlite_bind_mount_backup_restore_roundtrip_via_existing_tar_mechanics(t
     already use for any external bind mount -- proves the checkpointed main
     .db file survives a real tar+untar cycle with data intact, using real
     sqlite3 throughout (no mocks)."""
-    bind_mount_dir = tmp_path / "var_poki_db"
+    bind_mount_dir = tmp_path / "var_app_db"
     bind_mount_dir.mkdir()
-    db_path = bind_mount_dir / "poki.sqlite"
+    db_path = bind_mount_dir / "app.sqlite"
 
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
@@ -338,10 +338,10 @@ def test_sqlite_bind_mount_backup_restore_roundtrip_via_existing_tar_mechanics(t
     assert engines.checkpoint_wal(db_path) is True
 
     # backup.sh/collect.py's actual mechanism: tar czf the whole mount dir.
-    tar_path = tmp_path / "external-mounts" / "var_poki_db.tar.gz"
+    tar_path = tmp_path / "external-mounts" / "var_app_db.tar.gz"
     tar_path.parent.mkdir()
     with tarfile.open(tar_path, "w:gz") as tar:
-        tar.add(bind_mount_dir, arcname="var_poki_db")
+        tar.add(bind_mount_dir, arcname="var_app_db")
     conn.close()
 
     # restore.sh/_restore_external_mounts's actual mechanism: tar xzf back out.
@@ -350,15 +350,15 @@ def test_sqlite_bind_mount_backup_restore_roundtrip_via_existing_tar_mechanics(t
     with tarfile.open(tar_path, "r:gz") as tar:
         tar.extractall(restore_dir, filter="data")
 
-    restored_db = restore_dir / "var_poki_db" / "poki.sqlite"
+    restored_db = restore_dir / "var_app_db" / "app.sqlite"
     assert restored_db.is_file()
     fresh = sqlite3.connect(str(restored_db))
     assert fresh.execute("SELECT body FROM messages").fetchone() == ("backup me",)
     fresh.close()
 
 
-# --- InfluxDB (KEDGE-W-004 new engine) — mocked docker, real fleet is v2.6 -----
-# (cowork/servers.yaml: prod-multi01 runs influxdb 2.6 -- v1 is detected only
+# --- InfluxDB (new engine) — mocked docker, real fleet is v2.6 -----
+# (a real fleet runs influxdb 2.6 -- v1 is detected only
 # so it fails loudly at import time instead of running the wrong command.)
 
 def test_influx_is_v1_detects_by_major_tag():

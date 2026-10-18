@@ -87,7 +87,7 @@ def _stub_no_live_mounts(monkeypatch):
 
 
 def test_restore_external_mounts_legacy_tar_extracts_each_archive(monkeypatch, tmp_path):
-    """Pre-CW-W-258 snapshots stored external mounts as tar.gz archives —
+    """Legacy-format snapshots stored external mounts as tar.gz archives —
     these must stay restorable even after the fix switches new backups to
     direct-path (meta.json has no bind_mount_paths for such a snapshot)."""
     _stub_no_live_mounts(monkeypatch)
@@ -102,7 +102,7 @@ def test_restore_external_mounts_legacy_tar_extracts_each_archive(monkeypatch, t
 
     restore._restore_external_mounts(staging_dir, backup_root, meta={}, verify_only=False, force_live=False)
 
-    # Pre-existing bug fixed alongside CW-W-258: the archive was built with
+    # Pre-existing bug fixed alongside the bind-mount change: the archive was built with
     # the mount's own dirname as -C (tar czf ... -C mount.parent mount.name),
     # extracting straight back to that real absolute path -- no double-nesting
     # (mount_dir/mount_dir.name/... instead of mount_dir/...).
@@ -117,15 +117,15 @@ def test_restore_external_mounts_noop_when_nothing_to_restore(tmp_path):
 
 
 def test_restore_external_mounts_direct_path_dir(monkeypatch, tmp_path):
-    """CW-W-258: new-format snapshots list bind_mount_paths in meta.json —
+    """new-format snapshots list bind_mount_paths in meta.json —
     restic already restored the directory directly under staging_dir at its
     original absolute path (same layout as a direct-path volume); it must be
     rsynced back in place, no tar.gz involved."""
     _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
-    orig_path = "/var/poki/mirror"
-    restored = staging_dir / "var" / "poki" / "mirror"
+    orig_path = "/var/app/mirror"
+    restored = staging_dir / "var" / "app" / "mirror"
     _write(restored / "msg1.eml", "hi\n")
 
     rsync_calls = []
@@ -146,8 +146,8 @@ def test_restore_external_mounts_direct_path_file(monkeypatch, tmp_path):
     _stub_no_live_mounts(monkeypatch)
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
-    orig_path = "/opt/poki/config/auto-rules.yml"
-    restored = staging_dir / "opt" / "poki" / "config" / "auto-rules.yml"
+    orig_path = "/opt/app/config/auto-rules.yml"
+    restored = staging_dir / "opt" / "app" / "config" / "auto-rules.yml"
     _write(restored, "rules: []\n")
 
     copy_calls = []
@@ -171,7 +171,7 @@ def test_restore_external_mounts_direct_path_missing_warns(monkeypatch, tmp_path
 
     # must not raise — just warns and skips
     restore._restore_external_mounts(
-        staging_dir, backup_root, meta={"bind_mount_paths": ["/var/poki/mirror"]},
+        staging_dir, backup_root, meta={"bind_mount_paths": ["/var/app/mirror"]},
         verify_only=False, force_live=False,
     )
 
@@ -184,19 +184,19 @@ def test_bind_mount_live_sources_collects_bind_type_only(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0, stdout="c1\nc2\n")
         if cmd[:2] == ["docker", "inspect"] and cmd[2] == "c1":
             mounts = json.dumps([
-                {"Type": "bind", "Source": "/var/poki/mirror"},
+                {"Type": "bind", "Source": "/var/app/mirror"},
                 {"Type": "volume", "Source": "/var/lib/docker/volumes/x/_data"},
             ])
             return subprocess.CompletedProcess(cmd, 0, stdout=mounts)
         if cmd[:2] == ["docker", "inspect"] and cmd[2] == "c2":
-            mounts = json.dumps([{"Type": "bind", "Source": "/opt/poki/config"}])
+            mounts = json.dumps([{"Type": "bind", "Source": "/opt/app/config"}])
             return subprocess.CompletedProcess(cmd, 0, stdout=mounts)
         return subprocess.CompletedProcess(cmd, 1, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     sources = restore._bind_mount_live_sources()
-    assert sources == {"/var/poki/mirror", "/opt/poki/config"}
+    assert sources == {"/var/app/mirror", "/opt/app/config"}
 
 
 def test_bind_mount_live_sources_no_running_containers(monkeypatch):
@@ -217,7 +217,7 @@ def test_bind_mount_live_sources_inspect_failure_skipped(monkeypatch):
     assert restore._bind_mount_live_sources() == set()
 
 
-# --- _restore_external_mounts: CW-W-243-style live-mount guard ---------------
+# --- _restore_external_mounts: live-mount guard (as for volumes) ---------------
 
 def test_restore_external_mounts_verify_never_touches_real_path(monkeypatch, tmp_path):
     """--verify must isolate under a `_restoretest`-suffixed sibling, even
@@ -227,8 +227,8 @@ def test_restore_external_mounts_verify_never_touches_real_path(monkeypatch, tmp
     concern: this must not need _bind_mount_live_sources stubbed at all)."""
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
-    orig_path = "/var/poki/mirror"
-    restored = staging_dir / "var" / "poki" / "mirror"
+    orig_path = "/var/app/mirror"
+    restored = staging_dir / "var" / "app" / "mirror"
     _write(restored / "msg1.eml", "hi\n")
 
     rsync_calls = []
@@ -244,14 +244,14 @@ def test_restore_external_mounts_verify_never_touches_real_path(monkeypatch, tmp
         staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=True, force_live=False,
     )
 
-    assert rsync_calls[0][4] == "/var/poki/mirror_restoretest/"
+    assert rsync_calls[0][4] == "/var/app/mirror_restoretest/"
 
 
 def test_restore_external_mounts_refuses_live_mount_without_force(monkeypatch, tmp_path):
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
-    orig_path = "/var/poki/mirror"
-    _write(staging_dir / "var" / "poki" / "mirror" / "msg1.eml", "hi\n")
+    orig_path = "/var/app/mirror"
+    _write(staging_dir / "var" / "app" / "mirror" / "msg1.eml", "hi\n")
 
     monkeypatch.setattr(restore, "_bind_mount_live_sources", lambda: {orig_path})
 
@@ -264,8 +264,8 @@ def test_restore_external_mounts_refuses_live_mount_without_force(monkeypatch, t
 def test_restore_external_mounts_force_live_overwrites(monkeypatch, tmp_path):
     staging_dir = tmp_path / "staging"
     backup_root = tmp_path / "backup_root"
-    orig_path = "/var/poki/mirror"
-    restored = staging_dir / "var" / "poki" / "mirror"
+    orig_path = "/var/app/mirror"
+    restored = staging_dir / "var" / "app" / "mirror"
     _write(restored / "msg1.eml", "hi\n")
 
     monkeypatch.setattr(restore, "_bind_mount_live_sources", lambda: {orig_path})
@@ -277,7 +277,7 @@ def test_restore_external_mounts_force_live_overwrites(monkeypatch, tmp_path):
         staging_dir, backup_root, meta={"bind_mount_paths": [orig_path]}, verify_only=False, force_live=True,
     )
 
-    assert rsync_calls[0][4] == "/var/poki/mirror/"
+    assert rsync_calls[0][4] == "/var/app/mirror/"
 
 
 # --- _project_name -------------------------------------------------------------
@@ -481,7 +481,7 @@ def test_restore_volumes_verify_only_uses_restoretest_name(monkeypatch, tmp_path
 # --- dump import ---------------------------------------------------------------
 #
 # The per-engine import implementations (_import_postgres et al.) moved to
-# kedge.engines (KEDGE-W-004) -- their tests moved with them, see
+# kedge.engines -- their tests moved with them, see
 # test_engines.py. Only the generic suffix-dispatch loop stays here.
 
 def test_import_dumps_dispatches_by_suffix(monkeypatch, tmp_path, capsys):
