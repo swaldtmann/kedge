@@ -211,7 +211,7 @@ The built-in hook mechanism is the recommended way to integrate monitoring. Add 
 BACKUP_POST_HOOK='curl -sf https://hc-ping.com/your-uuid'
 BACKUP_FAIL_HOOK='curl -sf https://hc-ping.com/your-uuid/fail'
 
-# MQTT (for swarm-based monitoring)
+# MQTT (for MQTT-based monitoring)
 BACKUP_POST_HOOK='mosquitto_pub -h localhost -u agent -P "$MQTT_PASS" -t health/backup -m "{\"status\":\"ok\",\"snapshot\":\"$BACKUP_SNAPSHOT\",\"duration\":$BACKUP_DURATION,\"size\":\"$BACKUP_SIZE\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
 BACKUP_FAIL_HOOK='mosquitto_pub -h localhost -u agent -P "$MQTT_PASS" -t health/backup -m "{\"status\":\"fail\",\"error\":\"$BACKUP_ERROR\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
 ```

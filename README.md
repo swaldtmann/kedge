@@ -87,7 +87,7 @@ against the same `RESTIC_REPOSITORY` to see available snapshots first.
 
 `restore.sh --verify` restores Docker volumes under an isolated `*_restoretest` name — it
 never writes into a volume that a running container has mounted, even when run on the same
-host the backup was taken from (CW-W-243). A genuine, non-`--verify` restore still refuses to
+host the backup was taken from. A genuine, non-`--verify` restore still refuses to
 overwrite a volume that already exists AND is mounted by a running container, unless you pass
 `--force-live`.
 
@@ -95,8 +95,8 @@ That guard is defense in depth, not the primary safety mechanism. **The primary 
 don't manually run `restore.sh --verify` on a production host at all.** Use `verify.sh`
 instead — it restores onto a fresh, ephemeral Hetzner Cloud box (never the backup source),
 checks that the stack actually starts and is healthy, then burns the box. That's the tool
-quarterly restore-test routines (`EWH-W-133`, `CW-W-223`) should call, not a manual SSH session
-against `prod-*`.
+quarterly restore-test routines should call, not a manual SSH session
+against a production host.
 
 ## Backup Targets
 
@@ -177,7 +177,7 @@ Examples:
 BACKUP_POST_HOOK='curl -sf https://hc-ping.com/your-uuid'
 BACKUP_FAIL_HOOK='curl -sf https://hc-ping.com/your-uuid/fail'
 
-# MQTT (e.g., KIgulls swarm monitoring)
+# MQTT (e.g., for a monitoring bus)
 BACKUP_POST_HOOK='mosquitto_pub -h localhost -t health/backup -m "{\"status\":\"ok\",\"snapshot\":\"$BACKUP_SNAPSHOT\",\"duration\":$BACKUP_DURATION,\"size\":\"$BACKUP_SIZE\",\"ts\":\"$BACKUP_TIMESTAMP\"}"'
 
 # Slack webhook
@@ -205,8 +205,8 @@ metric after a successful backup, so an alert rule like
 BACKUP_POST_HOOK='tools/backup-freshness-write "$BACKUP_STACK"'
 ```
 
-Target directory defaults to `/opt/drayve/deploy/stack/monitoring/node-exporter-textfile`,
-override via `BACKUP_FRESHNESS_DIR`.
+The target directory defaults to `/opt/drayve/deploy/stack/monitoring/node-exporter-textfile`
+(the layout used when deployed with drayve); override it via `BACKUP_FRESHNESS_DIR`.
 
 ## Hot Backup (Zero Downtime)
 
