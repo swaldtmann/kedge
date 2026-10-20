@@ -20,8 +20,14 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
   non-zero exit of the import command) no longer logs "dump imported". It logs
   a warning with the exit code instead, the restore continues, and the final
   line reports the number of failed imports instead of "Restore complete".
+- `restore.sh`: a MySQL or MongoDB dump whose container was not running was
+  skipped silently. All three engines now warn and count it as a failed import.
 
 ### Changed
+- **Behaviour change for callers:** `restore.sh` now exits 1 when any database
+  dump failed to import or was skipped because its container was not running
+  (previously exit 0). Scripts and cron jobs that call `restore.sh` see this as
+  a failure.
 - `SECURITY.md`: supported versions updated from 0.5.x to 0.6.x.
 
 ## [0.6.0] - 2026-10-20
