@@ -32,7 +32,8 @@ services:
 ```
 
 - Mounts **inside** the stack directory → included when backing up the stack dir
-- Mounts **outside** the stack directory → archived separately as tar.gz
+- Mounts **outside** the stack directory → backed up in place by restic (direct path, no tar.gz; sockets and missing paths are skipped with a warning)
+- Mounts listed in `BACKUP_EXCLUDE_MOUNTS` are skipped (see below)
 
 ### Database Pre-Hooks
 
@@ -101,6 +102,19 @@ To skip specific volumes (e.g., large cache volumes that don't need backup):
 export BACKUP_EXCLUDE_VOLUMES="prometheus_data node_modules_cache"
 kedge-backup backup
 ```
+
+## Excluding Bind Mounts
+
+To skip bind mounts (exact path or anything below it):
+
+```bash
+export BACKUP_EXCLUDE_MOUNTS="/mnt/cache /var/tmp/scratch"
+kedge-backup backup
+```
+
+## Staging Directory
+
+Before restic runs, dumps, stack files and `meta.json` are collected in `$KEDGE_STAGING_BASE/<stack-dir-name>` (default `/var/lib/kedge/staging`). The path is deliberately stable so restic can find the parent snapshot and scan incrementally. Override `KEDGE_STAGING_BASE` if `/var/lib/kedge` is not writable or sits on a too-small filesystem.
 
 ## Adding New Services
 

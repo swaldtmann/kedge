@@ -141,15 +141,14 @@ echo "CONTAINERS=$CONTAINERS_RUNNING/$CONTAINERS_TOTAL"
 _HEALTHCHECK_SCRIPT = _HEALTHCHECK_SCRIPT_HEAD.replace("{db_case_block}", build_healthcheck_case_block())
 
 
-# Defaults aktualisiert 2026-07-26: die alte Kette
-# cpx23/cpx21/cax11 ist bei Hetzner im Zuge der "Standardisierung und
-# Preisanpassung" 2026 fuer Neubestellungen komplett zurueckgezogen (an nbg1/
-# fsn1/hel1 alle "Available: no"). Aktuell neu-erstellbar + x86 + guenstig:
-# cx23 nur an hel1 (EUR 0.0088/h, 2 vCPU/4 GB) als Default, cpx22/cpx12 als
-# ueberall verfuegbare Fallbacks. Default-Location deshalb hel1 (dort ist cx23
-# verfuegbar). Der fruehere Default-Kontext existiert nicht mehr (2026-07-26
-# geloescht). Hcloud-Kontext und SSH-Key-Name haben keinen Default mehr; sie
-# muessen gesetzt werden (siehe _require_hcloud_context/_require_ssh_key_name).
+# Defaults updated 2026-07-26: Hetzner withdrew the old chain
+# cpx23/cpx21/cax11 for new orders entirely as part of its 2026 "standardisation
+# and price adjustment" (all "Available: no" at nbg1/fsn1/hel1). Currently
+# creatable + x86 + cheap: cx23 only at hel1 (EUR 0.0088/h, 2 vCPU/4 GB) as the
+# default, cpx22/cpx12 as fallbacks available everywhere. Default location is
+# therefore hel1 (where cx23 is available). The former default context no longer
+# exists (deleted 2026-07-26). The hcloud context and SSH key name have no
+# default any more; they must be set (see _require_hcloud_context/_require_ssh_key_name).
 DEFAULT_SERVER_TYPE = "cx23"
 DEFAULT_LOCATION = "hel1"
 SERVER_TYPE_FALLBACKS = ("cx23", "cpx22", "cpx12")
