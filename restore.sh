@@ -110,27 +110,45 @@ cleanup() {
 # Database dump import
 # ---------------------------------------------------------------------------
 
+# Number of DB imports that exited non-zero; reported in the final summary.
+IMPORT_FAILURES=0
+
+# usage: _report_import <label> <exit-code> <output>
+# Prints the last lines of the import output; ok only on exit 0, otherwise a
+# warning (the restore continues, but the failure is counted for the summary).
+_report_import() {
+    local label="$1" rc="$2" out="$3"
+    [[ -n "$out" ]] && printf '%s\n' "$out" | tail -3
+    if [[ "$rc" -eq 0 ]]; then
+        ok "  $label dump imported"
+    else
+        warn "  $label import failed (exit $rc) — check the database"
+        IMPORT_FAILURES=$((IMPORT_FAILURES + 1))
+    fi
+}
+
 import_postgres_dump() {
-    local container="$1" pg_user="$2" dump_file="$3"
-    gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" 2>&1 \
-        | tail -3 || warn "PostgreSQL import reported errors (may be harmless)"
-    ok "  PostgreSQL dump imported"
+    local container="$1" pg_user="$2" dump_file="$3" out rc
+    # -d postgres: see src/kedge/engines.py -- without it psql connects to a DB
+    # named after pg_user, which need not exist (silent data loss). No
+    # ON_ERROR_STOP: pg_dumpall streams produce expected errors ("role already
+    # exists"). With pipefail rc is the last failing stage (docker/psql or gunzip).
+    out="$(gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" -d postgres 2>&1)" && rc=0 || rc=$?
+    _report_import "PostgreSQL" "$rc" "$out"
 }
 
 # usage: import_mysql_dump <container> <dump_file> <client_bin> [docker-exec args...]
 import_mysql_dump() {
-    local container="$1" dump_file="$2" client_bin="$3"
+    local container="$1" dump_file="$2" client_bin="$3" out rc
     shift 3
-    gunzip -c "$dump_file" | docker exec -i "$@" "$container" "$client_bin" -uroot 2>&1 \
-        | tail -3 || warn "MySQL import reported errors (may be harmless)"
-    ok "  MySQL dump imported"
+    out="$(gunzip -c "$dump_file" | docker exec -i "$@" "$container" "$client_bin" -uroot 2>&1)" && rc=0 || rc=$?
+    _report_import "MySQL" "$rc" "$out"
 }
 
 import_mongo_dump() {
-    local container="$1" dump_file="$2"
-    docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1 \
-        | tail -3 || warn "MongoDB import reported errors"
-    ok "  MongoDB dump imported"
+    local container="$1" dump_file="$2" out rc
+    out="$(docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1)" && rc=0 || rc=$?
+    _report_import "MongoDB" "$rc" "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -550,7 +568,11 @@ cmd_restore() {
     end_time="$(date +%s)"
     duration="$((end_time - start_time))"
 
-    ok "=== Restore complete (${duration}s) ==="
+    if [[ "$IMPORT_FAILURES" -gt 0 ]]; then
+        warn "=== Restore finished with $IMPORT_FAILURES failed database import(s) (${duration}s) — check the database(s) ==="
+    else
+        ok "=== Restore complete (${duration}s) ==="
+    fi
     info "Stack running at: $RESTORE_TARGET"
 }
 
