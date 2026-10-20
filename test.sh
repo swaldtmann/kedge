@@ -762,7 +762,7 @@ main() {
     esac
 }
 
-# Nur ausfuehren, wenn direkt aufgerufen -- beim Sourcen (bats-Tests) still bleiben.
+# Only run when invoked directly -- stay silent when sourced (bats tests).
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi

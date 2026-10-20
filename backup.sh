@@ -410,12 +410,12 @@ run_pre_hooks() {
             mysql)
                 info "Dumping MySQL/MariaDB ($container_name)..."
                 # Extract password from container env — pass via MYSQL_PWD env var (not CLI arg)
-                # DBROOT ergaenzt (Mailcow-Konvention, weicht vom
-                # MYSQL_ROOT_PASSWORD/MARIADB_ROOT_PASSWORD-Standard ab). Ein
-                # Stack mit einer weiteren untypischen Var fuehrte vorher zu
-                # einem STILLEN, unauthentifizierten Dump-Versuch statt einem
-                # klaren Fehler -- kein Passwort gefunden heisst jetzt hart
-                # fehlschlagen (s. unten), nicht "einfach mal ohne versuchen".
+                # DBROOT added (Mailcow convention, deviates from the
+                # MYSQL_ROOT_PASSWORD/MARIADB_ROOT_PASSWORD standard). A
+                # stack with yet another unusual variable used to lead to a
+                # SILENT, unauthenticated dump attempt instead of a clear
+                # error -- no password found now means a hard failure
+                # (see below), not "just try without one".
                 local mysql_pass=""
                 mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
                     | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|DBROOT)=' | head -1 | cut -d= -f2 || true)"
@@ -433,10 +433,10 @@ run_pre_hooks() {
                 # No-op/ignored for MyISAM tables, same as upstream mysqldump behavior.
                 docker exec "${mysql_exec_args[@]}" "$container" "$dump_cmd" --all-databases --single-transaction -uroot 2>/dev/null \
                     | gzip > "$dump_dir/${svc}_mysql.sql.gz"
-                # expliziter Exit-Code-Check statt sich auf `set -e`
-                # + pipefail durch den docker-exec|gzip-Pipe zu verlassen -- ein
-                # fehlgeschlagener Dump (falsches Passwort, Container-Problem)
-                # wurde vorher trotzdem unbedingt als "ok" geloggt.
+                # Explicit exit-code check instead of relying on `set -e`
+                # + pipefail through the docker-exec|gzip pipe -- a failed
+                # dump (wrong password, container problem) used to be logged
+                # as "ok" unconditionally.
                 if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
                     die "MySQL/MariaDB dump for '$svc' ($container_name) failed (${dump_cmd} exit ${PIPESTATUS[0]}) — not marking as ok."
                 fi
@@ -1131,7 +1131,7 @@ main() {
     esac
 }
 
-# Nur ausfuehren, wenn direkt aufgerufen -- beim Sourcen (bats-Tests) still bleiben.
+# Only run when invoked directly -- stay silent when sourced (bats tests).
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
