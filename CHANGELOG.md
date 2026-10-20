@@ -9,6 +9,8 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
 ### Changed
 - **Breaking:** `verify.sh`, `test.sh` and `kedge verify` / `kedge burn` no longer
   have built-in defaults for the hcloud context (`HCLOUD_CONTEXT`) or the hcloud
