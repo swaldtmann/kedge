@@ -9,6 +9,21 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-20
+
+### Fixed
+- `restore.sh`: the PostgreSQL import now connects with `psql -d postgres`
+  (as the Python restore path already did). Without it, psql connected to a
+  database named after `POSTGRES_USER`, which need not exist when `POSTGRES_DB`
+  differs -- nothing was imported, yet the run reported "dump imported".
+- `restore.sh`: a failed database import (PostgreSQL, MySQL/MariaDB, MongoDB;
+  non-zero exit of the import command) no longer logs "dump imported". It logs
+  a warning with the exit code instead, the restore continues, and the final
+  line reports the number of failed imports instead of "Restore complete".
+
+### Changed
+- `SECURITY.md`: supported versions updated from 0.5.x to 0.6.x.
+
 ## [0.6.0] - 2026-10-20
 
 ### Changed
