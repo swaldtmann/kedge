@@ -107,6 +107,150 @@ cleanup() {
 }
 
 # ---------------------------------------------------------------------------
+# Database dump import
+# ---------------------------------------------------------------------------
+
+# Number of DB imports that exited non-zero; reported in the final summary.
+IMPORT_FAILURES=0
+
+# usage: _report_import <label> <exit-code> <output>
+# Prints the last lines of the import output; ok only on exit 0, otherwise a
+# warning (the restore continues, but the failure is counted for the summary).
+_report_import() {
+    local label="$1" rc="$2" out="$3"
+    [[ -n "$out" ]] && printf '%s\n' "$out" | tail -3
+    if [[ "$rc" -eq 0 ]]; then
+        ok "  $label dump imported"
+    else
+        warn "  $label import failed (exit $rc) — check the database"
+        IMPORT_FAILURES=$((IMPORT_FAILURES + 1))
+    fi
+}
+
+# A dump whose container is not running is not imported: warn and count it.
+_skip_import() {
+    warn "  Container for $1 not running — skip dump import"
+    IMPORT_FAILURES=$((IMPORT_FAILURES + 1))
+}
+
+# usage: _finish_restore <duration-seconds>
+# Final summary line; returns 1 if any dump failed to import or was skipped.
+_finish_restore() {
+    if [[ "$IMPORT_FAILURES" -gt 0 ]]; then
+        warn "=== Restore finished: $IMPORT_FAILURES database import(s) failed or skipped (${1}s) — check the database(s) ==="
+        return 1
+    fi
+    ok "=== Restore complete (${1}s) ==="
+}
+
+import_postgres_dump() {
+    local container="$1" pg_user="$2" dump_file="$3" out rc
+    # -d postgres: see src/kedge/engines.py -- without it psql connects to a DB
+    # named after pg_user, which need not exist (silent data loss). No
+    # ON_ERROR_STOP: pg_dumpall streams produce expected errors ("role already
+    # exists"). With pipefail rc is the last failing stage (docker/psql or gunzip).
+    out="$(gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" -d postgres 2>&1)" && rc=0 || rc=$?
+    _report_import "PostgreSQL" "$rc" "$out"
+}
+
+# usage: import_mysql_dump <container> <dump_file> <client_bin> [docker-exec args...]
+import_mysql_dump() {
+    local container="$1" dump_file="$2" client_bin="$3" out rc
+    shift 3
+    out="$(gunzip -c "$dump_file" | docker exec -i "$@" "$container" "$client_bin" -uroot 2>&1)" && rc=0 || rc=$?
+    _report_import "MySQL" "$rc" "$out"
+}
+
+import_mongo_dump() {
+    local container="$1" dump_file="$2" out rc
+    out="$(docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1)" && rc=0 || rc=$?
+    _report_import "MongoDB" "$rc" "$out"
+}
+
+import_dumps() {
+    local backup_root="$1"
+    for dump_file in "$backup_root/dumps/"*; do
+        [[ -f "$dump_file" ]] || continue
+        local dump_name
+        dump_name="$(basename "$dump_file")"
+        local svc_name
+        svc_name="$(echo "$dump_name" | sed 's/_\(postgres\|mysql\|mongo\).*$//')"
+
+        case "$dump_name" in
+            *_postgres.sql.gz)
+                info "Importing PostgreSQL dump: $dump_name -> $svc_name"
+                local container
+                container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                if [[ -n "$container" ]]; then
+                    local pg_user
+                    pg_user="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                        | grep '^POSTGRES_USER=' | cut -d= -f2)"
+                    pg_user="${pg_user:-postgres}"
+                    # Wait for postgres to accept connections
+                    for _ in $(seq 1 30); do
+                        if docker exec "$container" pg_isready -U "$pg_user" >/dev/null 2>&1; then
+                            break
+                        fi
+                        sleep 2
+                    done
+                    import_postgres_dump "$container" "$pg_user" "$dump_file"
+                else
+                    _skip_import "$svc_name"
+                fi
+                ;;
+
+            *_mysql.sql.gz)
+                info "Importing MySQL dump: $dump_name -> $svc_name"
+                local container
+                container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                if [[ -n "$container" ]]; then
+                    # Pass password via MYSQL_PWD env var (not visible in ps)
+                    local mysql_pass=""
+                    mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
+                        | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
+                    local mysql_exec_args=()
+                    if [[ -n "$mysql_pass" ]]; then
+                        mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
+                    fi
+                    # modern mariadb:11+ images only ship mariadb/mariadb-admin,
+                    # not mysql/mysqladmin -- same binary split already fixed in
+                    # src/kedge/engines.py, restore.sh had the identical gap (silently
+                    # swallowed by the `|| warn` below, leaving the app DB never imported).
+                    local admin_bin="mysqladmin" client_bin="mysql"
+                    if docker exec "$container" sh -c 'command -v mariadb-admin >/dev/null 2>&1'; then
+                        admin_bin="mariadb-admin"
+                    fi
+                    if docker exec "$container" sh -c 'command -v mariadb >/dev/null 2>&1'; then
+                        client_bin="mariadb"
+                    fi
+                    # Wait for mysql
+                    for _ in $(seq 1 30); do
+                        if docker exec "${mysql_exec_args[@]}" "$container" "$admin_bin" ping -uroot >/dev/null 2>&1; then
+                            break
+                        fi
+                        sleep 2
+                    done
+                    import_mysql_dump "$container" "$dump_file" "$client_bin" "${mysql_exec_args[@]}"
+                else
+                    _skip_import "$svc_name"
+                fi
+                ;;
+
+            *_mongo.archive.gz)
+                info "Importing MongoDB dump: $dump_name -> $svc_name"
+                local container
+                container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
+                if [[ -n "$container" ]]; then
+                    import_mongo_dump "$container" "$dump_file"
+                else
+                    _skip_import "$svc_name"
+                fi
+                ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main restore logic
 # ---------------------------------------------------------------------------
 
@@ -424,88 +568,7 @@ cmd_restore() {
             info "Waiting for databases to be ready..."
             sleep 15
 
-            # Import dumps
-            for dump_file in "$backup_root/dumps/"*; do
-                [[ -f "$dump_file" ]] || continue
-                local dump_name
-                dump_name="$(basename "$dump_file")"
-                local svc_name
-                svc_name="$(echo "$dump_name" | sed 's/_\(postgres\|mysql\|mongo\).*$//')"
-
-                case "$dump_name" in
-                    *_postgres.sql.gz)
-                        info "Importing PostgreSQL dump: $dump_name -> $svc_name"
-                        local container
-                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
-                        if [[ -n "$container" ]]; then
-                            local pg_user
-                            pg_user="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                                | grep '^POSTGRES_USER=' | cut -d= -f2)"
-                            pg_user="${pg_user:-postgres}"
-                            # Wait for postgres to accept connections
-                            for _ in $(seq 1 30); do
-                                if docker exec "$container" pg_isready -U "$pg_user" >/dev/null 2>&1; then
-                                    break
-                                fi
-                                sleep 2
-                            done
-                            gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" 2>&1 \
-                                | tail -3 || warn "PostgreSQL import reported errors (may be harmless)"
-                            ok "  PostgreSQL dump imported"
-                        else
-                            warn "  Container for $svc_name not running — skip dump import"
-                        fi
-                        ;;
-
-                    *_mysql.sql.gz)
-                        info "Importing MySQL dump: $dump_name -> $svc_name"
-                        local container
-                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
-                        if [[ -n "$container" ]]; then
-                            # Pass password via MYSQL_PWD env var (not visible in ps)
-                            local mysql_pass=""
-                            mysql_pass="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
-                                | grep -E '^(MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD)=' | head -1 | cut -d= -f2 || true)"
-                            local mysql_exec_args=()
-                            if [[ -n "$mysql_pass" ]]; then
-                                mysql_exec_args=(-e "MYSQL_PWD=$mysql_pass")
-                            fi
-                            # modern mariadb:11+ images only ship mariadb/mariadb-admin,
-                            # not mysql/mysqladmin -- same binary split already fixed in
-                            # src/kedge/engines.py, restore.sh had the identical gap (silently
-                            # swallowed by the `|| warn` below, leaving the app DB never imported).
-                            local admin_bin="mysqladmin" client_bin="mysql"
-                            if docker exec "$container" sh -c 'command -v mariadb-admin >/dev/null 2>&1'; then
-                                admin_bin="mariadb-admin"
-                            fi
-                            if docker exec "$container" sh -c 'command -v mariadb >/dev/null 2>&1'; then
-                                client_bin="mariadb"
-                            fi
-                            # Wait for mysql
-                            for _ in $(seq 1 30); do
-                                if docker exec "${mysql_exec_args[@]}" "$container" "$admin_bin" ping -uroot >/dev/null 2>&1; then
-                                    break
-                                fi
-                                sleep 2
-                            done
-                            gunzip -c "$dump_file" | docker exec -i "${mysql_exec_args[@]}" "$container" "$client_bin" -uroot 2>&1 \
-                                | tail -3 || warn "MySQL import reported errors (may be harmless)"
-                            ok "  MySQL dump imported"
-                        fi
-                        ;;
-
-                    *_mongo.archive.gz)
-                        info "Importing MongoDB dump: $dump_name -> $svc_name"
-                        local container
-                        container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
-                        if [[ -n "$container" ]]; then
-                            docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1 \
-                                | tail -3 || warn "MongoDB import reported errors"
-                            ok "  MongoDB dump imported"
-                        fi
-                        ;;
-                esac
-            done
+            import_dumps "$backup_root"
         fi
     fi
 
@@ -529,8 +592,10 @@ cmd_restore() {
     end_time="$(date +%s)"
     duration="$((end_time - start_time))"
 
-    ok "=== Restore complete (${duration}s) ==="
+    local rc=0
+    _finish_restore "$duration" || rc=1
     info "Stack running at: $RESTORE_TARGET"
+    return "$rc"
 }
 
 # ---------------------------------------------------------------------------
