@@ -4,7 +4,7 @@ Full VPS/server recovery from a restic backup snapshot. Designed to work on a co
 
 ## Prerequisites
 
-On the new server:
+On the new server (run the restore as root, or with equivalent access to Docker and the volume directories; there is no explicit root check):
 
 ```bash
 apt-get update && apt-get install -y docker.io docker-compose-v2 restic jq rsync
@@ -85,8 +85,8 @@ curl -s http://localhost:8080/
 
 1. **Restic restore** — pulls snapshot to a temporary staging directory
 2. **Stack files** — restores `docker-compose.yml`, `.env`, all configs and bind mounts to `RESTORE_TARGET`
-3. **External bind mounts** — restores paths outside the stack directory to their original locations
-4. **Docker volumes** — creates named volumes and imports data from archived tar.gz files
+3. **External bind mounts** — restores paths outside the stack directory to their original locations (snapshots from kedge <= 0.3.x store them as tar.gz; see the CHANGELOG for limitations)
+4. **Docker volumes** — creates named volumes and copies the restored data in; volumes that could only be exported as tar.gz at backup time (mountpoint not accessible) are unpacked from the archive
 5. **Database imports** — starts DB containers first, then:
    - PostgreSQL: `gunzip | psql` from `pg_dumpall` dump
    - MySQL/MariaDB: `gunzip | mysql` from `mysqldump` dump

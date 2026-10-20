@@ -40,7 +40,7 @@ export STACK_DIR=/opt/myapp                      # where docker-compose.yml live
 On a fresh VPS with Docker + restic installed:
 
 ```bash
-apt-get update && apt-get install -y docker.io docker-compose-v2 restic jq
+apt-get update && apt-get install -y docker.io docker-compose-v2 restic jq rsync
 
 export RESTIC_REPOSITORY=sftp:backup@storage:/mystack
 export RESTIC_PASSWORD=<your-password>
@@ -123,8 +123,8 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | Category | What | How |
 |----------|------|-----|
 | **Database dumps** | PostgreSQL, MySQL, MariaDB, Valkey/Redis, MongoDB | Detected by image name, dumped before stack stop |
-| **Named volumes** | All volumes defined in compose file | Exported as tar.gz |
-| **Bind mounts** | All host directories mounted into containers | Copied (in-stack) or archived (external) |
+| **Named volumes** | All volumes defined in compose file | Backed up in place by restic (direct path below the Docker volume directory); tar.gz export only as fallback when the mountpoint is not accessible |
+| **Bind mounts** | All host directories mounted into containers | In-stack: copied with the stack files (`rsync`); external (outside the stack directory): backed up in place by restic, no tar.gz |
 | **Stack files** | docker-compose.yml, .env, override files | Direct copy |
 | **Metadata** | Timestamp, hostname, container list, volume mapping | meta.json |
 
@@ -149,6 +149,8 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `BACKUP_KEEP_WEEKLY` | `4` | Weekly snapshots to keep |
 | `BACKUP_KEEP_MONTHLY` | `3` | Monthly snapshots to keep |
 | `BACKUP_EXCLUDE_VOLUMES` | — | Space-separated volume names to skip |
+| `BACKUP_EXCLUDE_MOUNTS` | — | Space-separated bind-mount paths to skip (exact path or anything below it, e.g. `/mnt/cache`) |
+| `KEDGE_STAGING_BASE` | `/var/lib/kedge/staging` | Base directory for the staging area (dumps, stack copy, `meta.json`); the stack's basename is appended. Must be writable and stable between runs so restic finds its parent snapshot |
 | `SYSTEM_PATHS` | — | Space-separated absolute paths backed up alongside the stack (host-level state outside Docker, e.g. `/etc /root`) |
 | `SYSTEM_PATHS_EXCLUDE` | — | Space-separated restic `--exclude` patterns applied to `SYSTEM_PATHS` |
 | `BACKUP_POST_HOOK` | — | Command to run after successful backup |
@@ -322,10 +324,11 @@ Health checks:
 
 ## Prerequisites
 
+- root privileges: kedge has no explicit root check, but `backup.sh` / `restore.sh` read and write Docker volume directories and external bind mounts, run `docker`, and write to `/var/lib/kedge/staging`; run them as root (or an account with equivalent access)
 - `docker` (with compose v2 plugin)
 - `restic`
 - `jq`
-- `rsync`
+- `rsync` (stack-file copy during backup; restoring stack files, volumes and bind mounts)
 
 Install on Ubuntu/Debian:
 ```bash
@@ -334,7 +337,7 @@ apt-get install -y docker.io docker-compose-v2 restic jq rsync
 
 ## Built with
 
-This project is developed with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Anthropic Claude Opus 4.6).
+This project is developed with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
 ## License
 
