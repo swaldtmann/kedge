@@ -107,6 +107,33 @@ cleanup() {
 }
 
 # ---------------------------------------------------------------------------
+# Database dump import
+# ---------------------------------------------------------------------------
+
+import_postgres_dump() {
+    local container="$1" pg_user="$2" dump_file="$3"
+    gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" 2>&1 \
+        | tail -3 || warn "PostgreSQL import reported errors (may be harmless)"
+    ok "  PostgreSQL dump imported"
+}
+
+# usage: import_mysql_dump <container> <dump_file> <client_bin> [docker-exec args...]
+import_mysql_dump() {
+    local container="$1" dump_file="$2" client_bin="$3"
+    shift 3
+    gunzip -c "$dump_file" | docker exec -i "$@" "$container" "$client_bin" -uroot 2>&1 \
+        | tail -3 || warn "MySQL import reported errors (may be harmless)"
+    ok "  MySQL dump imported"
+}
+
+import_mongo_dump() {
+    local container="$1" dump_file="$2"
+    docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1 \
+        | tail -3 || warn "MongoDB import reported errors"
+    ok "  MongoDB dump imported"
+}
+
+# ---------------------------------------------------------------------------
 # Main restore logic
 # ---------------------------------------------------------------------------
 
@@ -449,9 +476,7 @@ cmd_restore() {
                                 fi
                                 sleep 2
                             done
-                            gunzip -c "$dump_file" | docker exec -i "$container" psql -U "$pg_user" 2>&1 \
-                                | tail -3 || warn "PostgreSQL import reported errors (may be harmless)"
-                            ok "  PostgreSQL dump imported"
+                            import_postgres_dump "$container" "$pg_user" "$dump_file"
                         else
                             warn "  Container for $svc_name not running — skip dump import"
                         fi
@@ -488,9 +513,7 @@ cmd_restore() {
                                 fi
                                 sleep 2
                             done
-                            gunzip -c "$dump_file" | docker exec -i "${mysql_exec_args[@]}" "$container" "$client_bin" -uroot 2>&1 \
-                                | tail -3 || warn "MySQL import reported errors (may be harmless)"
-                            ok "  MySQL dump imported"
+                            import_mysql_dump "$container" "$dump_file" "$client_bin" "${mysql_exec_args[@]}"
                         fi
                         ;;
 
@@ -499,9 +522,7 @@ cmd_restore() {
                         local container
                         container="$($COMPOSE_CMD ps -q "$svc_name" 2>/dev/null | head -1)"
                         if [[ -n "$container" ]]; then
-                            docker exec -i "$container" mongorestore --archive --gzip < "$dump_file" 2>&1 \
-                                | tail -3 || warn "MongoDB import reported errors"
-                            ok "  MongoDB dump imported"
+                            import_mongo_dump "$container" "$dump_file"
                         fi
                         ;;
                 esac
