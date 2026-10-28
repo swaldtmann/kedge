@@ -151,12 +151,34 @@ The backup script auto-discovers everything from `docker-compose.yml`:
 | `BACKUP_EXCLUDE_VOLUMES` | — | Space-separated volume names to skip |
 | `BACKUP_EXCLUDE_MOUNTS` | — | Space-separated bind-mount paths to skip (exact path or anything below it, e.g. `/mnt/cache`) |
 | `KEDGE_STAGING_BASE` | `/var/lib/kedge/staging` | Base directory for the staging area (dumps, stack copy, `meta.json`); the stack's basename is appended. Must be writable and stable between runs so restic finds its parent snapshot |
+| `KEDGE_STATE_DIR` | `/var/lib/kedge` | Directory for the per-stack version/status file (see [Version file](#version-file)) |
 | `SYSTEM_PATHS` | — | Space-separated absolute paths backed up alongside the stack (host-level state outside Docker, e.g. `/etc /root`) |
 | `SYSTEM_PATHS_EXCLUDE` | — | Space-separated restic `--exclude` patterns applied to `SYSTEM_PATHS` |
 | `BACKUP_POST_HOOK` | — | Command to run after successful backup |
 | `BACKUP_FAIL_HOOK` | — | Command to run after failed backup |
 | `BACKUP_HEALTHCHECK_URL` | — | Ping on success, `/fail` on error |
 | `RESTORE_TARGET` | `/opt/stack` | Where to restore the stack |
+
+## Version file
+
+Every `backup` and `prune` run (`kedge ...` and `backup.sh ...`) writes a status file per stack, so `cat` shows which kedge version ran last and how it ended:
+
+```
+$ cat /var/lib/kedge/myapp.version
+kedge=0.6.2
+stack=myapp
+run=backup
+started=2026-10-28T02:00:01Z
+finished=2026-10-28T02:03:44Z
+result=ok
+```
+
+- Path: `$KEDGE_STATE_DIR/<stack>.version` (default `/var/lib/kedge`), mode `0644`, directory created if missing. `<stack>` is the basename of `STACK_DIR`, so two stacks on one host give two files.
+- The file is overwritten each run by the last `backup` or `prune`. It is written atomically (temp file in the same directory, then rename).
+- A failed run writes `result=failed` and `exit=<code>` (only then); the run's exit code is unchanged.
+- If the file cannot be written, a warning is logged and the run continues normally.
+- `kedge=` source: the Python CLI uses the installed package version (= `pyproject.toml` at install time); `backup.sh` uses `git describe --tags --dirty` of its checkout (leading `v` stripped, e.g. `0.6.2`, or `0.6.2-3-gabc1234` between tags), falling back to the `pyproject.toml` version next to the script. If neither is available: `unknown`.
+- Never write into the installation directory (e.g. `/opt/kedge`, a git working copy): the file lives in the state directory.
 
 ## Post-Backup Hooks
 

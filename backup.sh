@@ -1116,6 +1116,67 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Version/status file: $KEDGE_STATE_DIR/<stack>.version (default /var/lib/kedge)
+# Same format as src/kedge/state.py. kedge= is `git describe --tags` of the
+# installation (leading "v" stripped); without git metadata the version from
+# pyproject.toml next to the script; else "unknown". Never fails the run.
+# ---------------------------------------------------------------------------
+
+kedge_file_version() {
+    local v
+    v="$(git -C "$SCRIPT_DIR" describe --tags --dirty 2>/dev/null || true)"
+    if [[ -z "$v" && -r "$SCRIPT_DIR/pyproject.toml" ]]; then
+        v="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$SCRIPT_DIR/pyproject.toml" | head -n 1)"
+    fi
+    v="${v#v}"
+    echo "${v:-unknown}"
+}
+
+write_version_file() {
+    local run="$1" started="$2" rc="$3"
+    local dir="${KEDGE_STATE_DIR:-/var/lib/kedge}"
+    local stack target tmp=""
+    stack="$(basename "$STACK_DIR")"
+    target="$dir/$stack.version"
+    {
+        mkdir -p "$dir" \
+            && tmp="$(mktemp "$dir/.$stack.version.XXXXXX")" \
+            && {
+                echo "kedge=$(kedge_file_version)"
+                echo "stack=$stack"
+                echo "run=$run"
+                echo "started=$started"
+                echo "finished=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                if [[ "$rc" -eq 0 ]]; then
+                    echo "result=ok"
+                else
+                    echo "result=failed"
+                    echo "exit=$rc"
+                fi
+            } > "$tmp" \
+            && chmod 644 "$tmp" \
+            && mv -f "$tmp" "$target"
+    } 2>/dev/null || {
+        warn "could not write version file $target"
+        if [[ -n "$tmp" ]]; then rm -f "$tmp" 2>/dev/null || true; fi
+    }
+    return 0
+}
+
+# Run cmd_$1 in a subshell (errexit kept, EXIT traps stay local), record the
+# outcome in the version file and return the command's exit code unchanged.
+run_recorded() {
+    local run="$1" started rc=0
+    started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    set +e
+    ( set -e; "cmd_$run" )
+    rc=$?
+    set -e
+    write_version_file "$run" "$started" "$rc"
+    return "$rc"
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1123,11 +1184,11 @@ main() {
     local cmd="${1:-help}"
 
     case "$cmd" in
-        backup)     cmd_backup ;;
+        backup)     run_recorded backup ;;
         init)       cmd_init ;;
         list|snapshots) cmd_list ;;
         check)      cmd_check ;;
-        prune)      cmd_prune ;;
+        prune)      run_recorded prune ;;
         discover)   cmd_discover ;;
         restore)    exec "$SCRIPT_DIR/restore.sh" "${@:2}" ;;
         help|--help|-h) usage ;;

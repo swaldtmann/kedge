@@ -9,6 +9,13 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+### Added
+- `kedge backup|prune` and `backup.sh backup|prune` write a per-stack status
+  file `$KEDGE_STATE_DIR/<stack>.version` (default `/var/lib/kedge`) with kedge
+  version, run type, start/finish time (UTC) and `result=ok|failed` (plus
+  `exit=<code>` on failure). Written atomically, also on failed runs; an
+  unwritable directory only logs a warning. See README "Version file".
+
 ## [0.6.2] - 2026-10-28
 
 ### Fixed

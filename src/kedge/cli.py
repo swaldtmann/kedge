@@ -20,6 +20,7 @@ from kedge.discovery import build_discover_report, compose_config, format_discov
 from kedge.errors import KedgeError
 from kedge.prereqs import check_prereqs
 from kedge.restore import cmd_restore
+from kedge.state import record_run
 from kedge.verify import VerifyConfig, cmd_burn, cmd_verify
 
 DEFAULT_RESTORE_TARGET = "/opt/stack"
@@ -54,7 +55,9 @@ def init() -> None:
 @_handle_kedge_errors
 def backup() -> None:
     """Run a full backup (discover + dump + collect + restic)."""
-    cmd_backup(Config.from_env())
+    cfg = Config.from_env()
+    with record_run(cfg, "backup"):
+        cmd_backup(cfg)
 
 
 @main.command()
@@ -83,7 +86,9 @@ def check() -> None:
 @_handle_kedge_errors
 def prune() -> None:
     """Remove old snapshots per retention policy."""
-    cmd_prune(Config.from_env())
+    cfg = Config.from_env()
+    with record_run(cfg, "prune"):
+        cmd_prune(cfg)
 
 
 @main.command()
