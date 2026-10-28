@@ -84,6 +84,7 @@ BACKUP_HEALTHCHECK_URL="${BACKUP_HEALTHCHECK_URL:-}"
 # Internal
 STAGING_DIR=""
 STACK_WAS_RUNNING=false
+STACK_RUNNING_SERVICES=""  # services running before stop_stack (space-separated)
 COMPOSE_CMD=""
 # Hook context (populated during backup, exported for hooks)
 BACKUP_DURATION=""
@@ -719,8 +720,13 @@ stop_stack() {
     fi
 
     cd "$STACK_DIR"
-    if $COMPOSE_CMD ps -q 2>/dev/null | head -1 | grep -q .; then
+    # Fail-closed: if the query fails, abort before stopping anything.
+    local running
+    running="$($COMPOSE_CMD ps --services --status running)" \
+        || die "Could not list running services — aborting before stop"
+    if [[ -n "$running" ]]; then
         STACK_WAS_RUNNING=true
+        STACK_RUNNING_SERVICES="$(echo "$running" | tr '\n' ' ')"
         info "Stopping stack for consistent backup..."
         $COMPOSE_CMD stop
         ok "Stack stopped"
@@ -731,7 +737,9 @@ start_stack() {
     if [[ "$STACK_WAS_RUNNING" == "true" ]]; then
         cd "$STACK_DIR"
         info "Restarting stack..."
-        $COMPOSE_CMD start
+        # Only services that ran before the stop — hand-stopped ones stay stopped.
+        # shellcheck disable=SC2086
+        $COMPOSE_CMD start $STACK_RUNNING_SERVICES
         ok "Stack restarted"
     fi
 }

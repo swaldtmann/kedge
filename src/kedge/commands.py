@@ -96,7 +96,7 @@ def cmd_backup(cfg: Config) -> None:
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True)
 
-    was_running = False
+    was_running: list[str] = []
     try:
         config = compose_config(cfg.stack_dir, prereqs.compose_cmd)
 
@@ -151,7 +151,7 @@ def cmd_backup(cfg: Config) -> None:
         )
 
         start_stack(cfg.stack_dir, prereqs.compose_cmd, was_running)
-        was_running = False  # started above — don't double-start in the except/finally paths
+        was_running = []  # started above — don't double-start in the except/finally paths
     except Exception as exc:
         if was_running:
             start_stack(cfg.stack_dir, prereqs.compose_cmd, was_running)

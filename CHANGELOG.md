@@ -9,6 +9,14 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+### Fixed
+- `kedge backup` / `backup.sh backup`: after the stack stop only the services
+  that were running before are started again (`compose start <services>`).
+  Services stopped by hand beforehand stay stopped; before, `compose start`
+  brought every service of the project back up. If the running-services
+  query (`compose ps --services --status running`) fails, the backup aborts
+  before stopping anything. If no service was running, nothing is started.
+
 ## [0.6.1] - 2026-10-20
 
 ### Fixed

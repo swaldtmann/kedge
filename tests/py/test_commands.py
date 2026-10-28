@@ -69,7 +69,7 @@ def test_cmd_backup_happy_path(monkeypatch, tmp_path):
     monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
     monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
     monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: calls.append("pre_hooks") or 0)
-    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: calls.append("stop") or False)
+    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: calls.append("stop") or [])
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: calls.append("collect_volumes") or ["/data/x"])
     monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: calls.append("collect_stack_files") or [])
     monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: calls.append("write_metadata"))
@@ -95,7 +95,7 @@ def test_cmd_backup_restarts_stack_and_cleans_staging_on_failure(monkeypatch, tm
     monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
     monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
     monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: 0)
-    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: True)  # stack WAS running
+    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: ["web"])  # stack WAS running
 
     def boom(*a, **kw):
         raise RuntimeError("collect failed")
@@ -118,7 +118,7 @@ def _stub_happy_path(monkeypatch):
     monkeypatch.setattr(commands, "compose_config", lambda stack_dir, cmd: {"services": {}})
     monkeypatch.setattr(commands, "check_hot_safety", lambda cfg: (True, []))
     monkeypatch.setattr(commands, "run_pre_hooks", lambda cfg, stack_dir, cmd, dump_dir: 0)
-    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: False)
+    monkeypatch.setattr(commands, "stop_stack", lambda *a, **kw: [])
     monkeypatch.setattr(commands, "collect_volumes", lambda *a, **kw: [])
     monkeypatch.setattr(commands, "collect_stack_files", lambda *a, **kw: [])
     monkeypatch.setattr(commands, "write_metadata", lambda *a, **kw: None)

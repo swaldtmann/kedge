@@ -3,6 +3,8 @@ generic docker exec/cp helpers used by kedge.engines."""
 
 import subprocess
 
+import pytest
+
 from kedge.docker_stack import (
     cmd_args,
     container_env,
@@ -33,47 +35,98 @@ def test_is_stack_running_false(monkeypatch, tmp_path):
 
 
 def test_stop_stack_hot_backup_mode_skips(tmp_path):
-    assert stop_stack(tmp_path, ["docker", "compose"], backup_stop_stack=False) is False
+    assert stop_stack(tmp_path, ["docker", "compose"], backup_stop_stack=False) == []
 
 
-def test_stop_stack_not_running_returns_false(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda cmd, cwd, capture_output, text, check: subprocess.CompletedProcess(cmd, 0, stdout=""),
-    )
-    assert stop_stack(tmp_path, ["docker", "compose"], backup_stop_stack=True) is False
+class FakeCompose:
+    """Mocks `docker compose` for one stack: svc name -> running flag."""
 
+    def __init__(self, services, ps_fails=False):
+        self.services = dict(services)
+        self.ps_fails = ps_fails
+        self.calls = []
 
-def test_stop_stack_running_stops_and_returns_true(monkeypatch, tmp_path):
-    calls = []
-
-    def fake_run(cmd, cwd=None, capture_output=None, text=None, check=None):
-        calls.append(cmd)
-        if "ps" in cmd:
-            return subprocess.CompletedProcess(cmd, 0, stdout="abc123\n")
+    def __call__(self, cmd, cwd=None, capture_output=None, text=None, check=None):
+        self.calls.append(list(cmd))
+        verb = cmd[2:]
+        if verb[:1] == ["ps"]:
+            if self.ps_fails:
+                if check:
+                    raise subprocess.CalledProcessError(1, cmd)
+                return subprocess.CompletedProcess(cmd, 1, stdout="")
+            if "--services" in verb:
+                out = "".join(f"{n}\n" for n, up in self.services.items() if up)
+            else:
+                out = "".join(f"c-{n}\n" for n, up in self.services.items() if up)
+            return subprocess.CompletedProcess(cmd, 0, stdout=out)
+        if verb[:1] == ["stop"]:
+            for n in (verb[1:] or self.services):
+                self.services[n] = False
+        elif verb[:1] == ["start"]:
+            for n in (verb[1:] or self.services):
+                self.services[n] = True
         return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert stop_stack(tmp_path, ["docker", "compose"], backup_stop_stack=True) is True
-    assert ["docker", "compose", "stop"] in calls
+
+COMPOSE = ["docker", "compose"]
 
 
-def test_start_stack_noop_if_not_was_running(monkeypatch, tmp_path):
+def test_stop_stack_not_running_returns_empty(monkeypatch, tmp_path):
+    fake = FakeCompose({"a": False, "b": False})
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert stop_stack(tmp_path, COMPOSE, backup_stop_stack=True) == []
+    assert not any(c[2:3] == ["stop"] for c in fake.calls)
+
+
+def test_stop_stack_running_stops_and_returns_running_services(monkeypatch, tmp_path):
+    fake = FakeCompose({"a": True, "b": True})
+    monkeypatch.setattr(subprocess, "run", fake)
+    assert stop_stack(tmp_path, COMPOSE, backup_stop_stack=True) == ["a", "b"]
+    assert ["docker", "compose", "stop"] in fake.calls
+
+
+def test_stop_stack_ps_failure_aborts_before_stop(monkeypatch, tmp_path):
+    fake = FakeCompose({"a": True}, ps_fails=True)
+    monkeypatch.setattr(subprocess, "run", fake)
+    with pytest.raises(subprocess.CalledProcessError):
+        stop_stack(tmp_path, COMPOSE, backup_stop_stack=True)
+    assert not any(c[2:3] == ["stop"] for c in fake.calls)
+    assert fake.services == {"a": True}
+
+
+def test_start_stack_noop_if_nothing_was_running(monkeypatch, tmp_path):
     def fake_run(*a, **kw):
         raise AssertionError("should not be called")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    start_stack(tmp_path, ["docker", "compose"], was_running=False)
+    start_stack(tmp_path, COMPOSE, [])
 
 
-def test_start_stack_restarts_if_was_running(monkeypatch, tmp_path):
+def test_start_stack_starts_only_listed_services(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(
         subprocess, "run",
         lambda cmd, cwd=None, check=None: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
     )
-    start_stack(tmp_path, ["docker", "compose"], was_running=True)
-    assert calls == [["docker", "compose", "start"]]
+    start_stack(tmp_path, COMPOSE, ["a", "c"])
+    assert calls == [["docker", "compose", "start", "a", "c"]]
+
+
+def test_backup_cycle_keeps_manually_stopped_service_stopped(monkeypatch, tmp_path):
+    fake = FakeCompose({"a": True, "b": False})
+    monkeypatch.setattr(subprocess, "run", fake)
+    running = stop_stack(tmp_path, COMPOSE, backup_stop_stack=True)
+    assert fake.services == {"a": False, "b": False}
+    start_stack(tmp_path, COMPOSE, running)
+    assert fake.services == {"a": True, "b": False}
+
+
+def test_backup_cycle_all_running_all_restarted(monkeypatch, tmp_path):
+    fake = FakeCompose({"a": True, "b": True})
+    monkeypatch.setattr(subprocess, "run", fake)
+    running = stop_stack(tmp_path, COMPOSE, backup_stop_stack=True)
+    start_stack(tmp_path, COMPOSE, running)
+    assert fake.services == {"a": True, "b": True}
 
 
 def test_container_for_service_returns_first_line(monkeypatch, tmp_path):
