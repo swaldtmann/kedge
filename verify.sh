@@ -24,8 +24,9 @@
 #
 # Environment (optional):
 #   HCLOUD_TOKEN          Alternative to HCLOUD_CONTEXT: API token directly
-#   VERIFY_SERVER_TYPE    Server type (default: cx43 — SYSTEM_PATHS restores
-#                         exceed cx23's 40GB disk)
+#   VERIFY_SERVER_TYPE    Server type tried first (default: cx43 — SYSTEM_PATHS
+#                         restores exceed cx23's 40GB disk). Fallbacks cpx32/cpx42,
+#                         all >= 160 GB; no smaller type is ever tried.
 #   VERIFY_LOCATION       Datacenter (default: nbg1)
 #   RESTIC_SFTP_KEY       Private key for sftp: repositories — uploaded to the verify
 #                         box so its restic can authenticate (the box has no SSH
@@ -158,12 +159,22 @@ check_prereqs() {
     # Verify snapshot exists
     info "Checking snapshot: $SNAPSHOT_ID"
     if [[ "$SNAPSHOT_ID" == "latest" ]]; then
-        local snap_check restic_lock_args=()
-        [[ "$RESTIC_NO_LOCK" == "1" ]] && restic_lock_args=(--no-lock)
-        snap_check="$(restic snapshots "${restic_lock_args[@]}" --latest 1 --json 2>/dev/null | jq -r '.[0].short_id // empty' 2>/dev/null || true)"
-        if [[ -z "$snap_check" ]]; then
-            die "No snapshots found in repository"
+        local snap_check snap_err restic_extra=()
+        [[ "$RESTIC_NO_LOCK" == "1" ]] && restic_extra+=(--no-lock)
+        # sftp: repos (Hetzner Storage Box) speak SFTP on port 23 and need the
+        # key given explicitly -- same settings setup_sftp_key installs on the box.
+        if [[ "$RESTIC_REPOSITORY" == sftp:* && -n "$RESTIC_SFTP_KEY" ]]; then
+            restic_extra+=(-o "sftp.args=-p 23 -i $RESTIC_SFTP_KEY -o IdentitiesOnly=yes")
         fi
+        snap_err="$(mktemp)"
+        snap_check="$(restic snapshots ${restic_extra[@]+"${restic_extra[@]}"} --latest 1 --json 2>"$snap_err" | jq -r '.[0].short_id // empty' 2>/dev/null || true)"
+        if [[ -z "$snap_check" ]]; then
+            local snap_msg
+            snap_msg="$(tr '\n' ' ' <"$snap_err")"
+            rm -f "$snap_err"
+            die "No snapshots found in repository${snap_msg:+ (restic: $snap_msg)}"
+        fi
+        rm -f "$snap_err"
         VERIFY_SNAPSHOT="$snap_check"
         ok "Latest snapshot: $VERIFY_SNAPSHOT"
     else
@@ -195,34 +206,53 @@ wait_for_ssh() {
 
 create_box() {
     local name="$1"
-    # cpx23/cpx21 (Gen1) don't exist in fsn1/nbg1 (Hetzner catalog only offers
-    # Gen1 cpx11-51 in ash/hil; fsn1/nbg1 got Gen2 cpx12-62) — verified live 2026-07-27.
-    local types=("$VERIFY_SERVER_TYPE" cx23 cpx22 cax11)
+    # Only types with >= 160 GB disk: the prod-cloud backup alone is ~55 GiB and
+    # the restore needs room for volumes + DB imports; cx23/cpx22/cax11 (40-80 GB)
+    # ran full on 2026-10-28. Disk sizes checked with `hcloud server-type list`
+    # 2026-10-28: cx43=160, cpx32=160, cpx42=320. Gen1 cpx (cpx31/41) don't exist
+    # in fsn1/nbg1/hel1 (verified live 2026-07-27).
+    local types=("$VERIFY_SERVER_TYPE") t
+    for t in cx43 cpx32 cpx42; do
+        [[ "$t" == "$VERIFY_SERVER_TYPE" ]] || types+=("$t")
+    done
     local locations=("$VERIFY_LOCATION" nbg1 fsn1 hel1)
-    local created=false
+    local created=false last_err="" out
+
+    # Labels as set by tools/hcloud-ephemeral (re-implemented, kedge stays standalone):
+    # ttl = today+1d (GNU date, else BSD date), owner = <node>_<sid8>,
+    # created_by_session = full session id (only when known).
+    local ttl_date node owner sid8="hand"
+    ttl_date="$(date -u -d '+1 day' +%Y-%m-%d 2>/dev/null || date -u -v+1d +%Y-%m-%d)"
+    node="$(hostname -s 2>/dev/null | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"
+    node="${node:-node}"
+    [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] && sid8="${CLAUDE_CODE_SESSION_ID:0:8}"
+    owner="${node:0:40}_${sid8}"
+    local label_args=(--label "purpose=kedge-verify" --label "class=ephemeral"
+                      --label "ttl=$ttl_date" --label "owner=$owner")
+    [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]] && label_args+=(--label "created_by_session=$CLAUDE_CODE_SESSION_ID")
 
     for stype in "${types[@]}"; do
         for loc in "${locations[@]}"; do
             info "Trying $name ($stype, $loc)..."
-            if hcloud server create \
+            if out="$(hcloud server create \
                 --name "$name" \
                 --type "$stype" \
                 --image "$VERIFY_IMAGE" \
                 --location "$loc" \
                 --ssh-key "$SSH_KEY_NAME" \
-                --label "purpose=kedge-verify" \
-                --label "class=ephemeral" \
-                --label "ttl=$(date -u -d '+1 day' +%Y-%m-%d)" >/dev/null 2>&1; then
+                "${label_args[@]}" 2>&1)"; then
                 created=true
                 ok "Server $name created ($stype, $loc)"
                 break 2
             fi
-            hcloud server delete "$name" 2>/dev/null || true
+            last_err="$out"
+            warn "$stype/$loc failed: $(echo "$out" | tail -n 1)"
+            hcloud server delete "$name" >/dev/null 2>&1 || true
         done
     done
 
     if ! $created; then
-        die "Could not create server — all type/location combinations failed"
+        die "Could not create server (types: ${types[*]}) — all type/location combinations failed. Last hcloud error: $(echo "$last_err" | tail -n 1)"
     fi
 
     local ip
@@ -308,20 +338,25 @@ fi
 
 echo "--- Health Checks ---"
 
-# Check 1: All services defined in compose are running
+# Check 1: All services defined in compose are running. One-shot containers
+# that finished with exit 0 (init jobs) count as OK; exit != 0 and restarting
+# stay failures. `ps -a` is needed: plain `ps` hides exited containers.
 echo ""
 echo "CHECK: Container status"
-EXPECTED=$($COMPOSE config --format json 2>/dev/null | jq -r '.services | keys[]' | wc -l)
-RUNNING=$($COMPOSE ps --format json 2>/dev/null | jq -s '[.[] | select(.State == "running")] | length')
+EXPECTED=$($COMPOSE config --format json 2>/dev/null | jq -r '.services | keys[]' | wc -l | tr -d ' ')
+PS_ALL=$($COMPOSE ps -a --format json 2>/dev/null)
+RUNNING=$(echo "$PS_ALL" | jq -s '[.[] | select(.State == "running")] | length')
+COMPLETED=$(echo "$PS_ALL" | jq -s '[.[] | select(.State == "exited" and (.ExitCode // 1) == 0)] | length')
+OK_COUNT=$((RUNNING + COMPLETED))
 CONTAINERS_TOTAL=$EXPECTED
-CONTAINERS_RUNNING=$RUNNING
+CONTAINERS_RUNNING=$OK_COUNT
 
-if [ "$RUNNING" -ge "$EXPECTED" ]; then
-    echo "  PASS: $RUNNING/$EXPECTED containers running"
+if [ "$OK_COUNT" -ge "$EXPECTED" ]; then
+    echo "  PASS: $OK_COUNT/$EXPECTED containers running ($COMPLETED one-shot completed with exit 0)"
 else
-    echo "  FAIL: $RUNNING/$EXPECTED containers running"
+    echo "  FAIL: $OK_COUNT/$EXPECTED containers running"
     echo "  Non-running:"
-    $COMPOSE ps --format json 2>/dev/null | jq -r 'select(.State != "running") | "    \(.Name): \(.State)"'
+    echo "$PS_ALL" | jq -r 'select(.State != "running" and (.State != "exited" or (.ExitCode // 1) != 0)) | "    \(.Name): \(.State) (exit \(.ExitCode // "?"))"'
     FAILURES=$((FAILURES + 1))
 fi
 CHECKS=$((CHECKS + 1))
@@ -415,6 +450,31 @@ done
 
 if [ "$DB_CHECKED" -eq 0 ]; then
     echo "  -- no database containers found --"
+fi
+
+# Check 2b: Nextcloud -- occ status must report installed + not in maintenance
+echo ""
+echo "CHECK: Nextcloud"
+NC_CHECKED=0
+for svc in $(echo "$CONFIG" | jq -r '.services | keys[]'); do
+    IMAGE=$(echo "$CONFIG" | jq -r --arg s "$svc" '.services[$s].image // "build"')
+    BASE_IMAGE="${IMAGE##*/}"
+    BASE_IMAGE="${BASE_IMAGE%%:*}"
+    [ "$BASE_IMAGE" = "nextcloud" ] || continue
+    CONTAINER=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
+    [ -z "$CONTAINER" ] && continue
+    NC_CHECKED=$((NC_CHECKED + 1))
+    CHECKS=$((CHECKS + 1))
+    OCC=$(docker exec -u www-data "$CONTAINER" php occ status 2>&1 || true)
+    if echo "$OCC" | grep -Eq 'installed: *true' && echo "$OCC" | grep -Eq 'maintenance: *false'; then
+        echo "  PASS: Nextcloud [$svc] installed, not in maintenance mode"
+    else
+        echo "  FAIL: Nextcloud [$svc] occ status: $(echo "$OCC" | tr '\n' ' ')"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+if [ "$NC_CHECKED" -eq 0 ]; then
+    echo "  -- no Nextcloud container found --"
 fi
 
 # Check 3: Services with exposed ports respond to HTTP
@@ -658,6 +718,7 @@ Environment (optional):
 Health checks performed:
   - All containers from docker-compose.yml are running
   - Database containers accept connections (PostgreSQL, MySQL, Valkey, MongoDB)
+  - Nextcloud (if present): occ status reports installed and not in maintenance
   - Services with exposed ports respond to HTTP
   - .env configuration file is present
 
