@@ -9,6 +9,8 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-28
+
 ### Added
 - `kedge backup|prune` and `backup.sh backup|prune` write a per-stack status
   file `$KEDGE_STATE_DIR/<stack>.version` (default `/var/lib/kedge`) with kedge
