@@ -9,6 +9,8 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-28
+
 ### Fixed
 - `kedge backup` / `backup.sh backup`: after the stack stop only the services
   that were running before are started again (`compose start <services>`).
@@ -16,6 +18,16 @@ Identifiers such as CW-W-123 refer to the maintainer's internal tracker.
   brought every service of the project back up. If the running-services
   query (`compose ps --services --status running`) fails, the backup aborts
   before stopping anything. If no service was running, nothing is started.
+- `verify.sh`: latest-snapshot lookup uses port 23 (Storage Box); errors are
+  no longer reported as "No snapshots found".
+- `verify.sh`: no silent fallback to undersized server types; only types with
+  at least 160 GB disk are tried, and `hcloud server create` errors are shown.
+- `verify.sh`: TTL and `owner` labels work on macOS (no GNU-only `date -d`),
+  so the ephemeral sweep recognises the box.
+- `verify.sh`: one-shot containers that exited 0 no longer count as failed.
+
+### Added
+- `verify.sh`: Nextcloud `occ status` health check.
 
 ## [0.6.1] - 2026-10-20
 
