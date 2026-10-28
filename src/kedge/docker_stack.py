@@ -23,24 +23,39 @@ def is_stack_running(stack_dir, compose_cmd: list[str]) -> bool:
     return bool(result.stdout.strip())
 
 
-def stop_stack(stack_dir, compose_cmd: list[str], backup_stop_stack: bool) -> bool:
-    """Returns True if the stack was running (and just got stopped)."""
+def running_services(stack_dir, compose_cmd: list[str]) -> list[str]:
+    """Names of the compose services that are running right now. Raises
+    CalledProcessError if the query fails (callers must not guess)."""
+    result = subprocess.run(
+        [*compose_cmd, "ps", "--services", "--status", "running"],
+        cwd=stack_dir, capture_output=True, text=True, check=True,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def stop_stack(stack_dir, compose_cmd: list[str], backup_stop_stack: bool) -> list[str]:
+    """Returns the services that were running (and just got stopped); empty if
+    nothing was stopped. If the running-services query fails, raises before
+    stopping anything (fail-closed)."""
     if not backup_stop_stack:
         log.info("BACKUP_STOP_STACK=false — stack stays running (backup may be inconsistent)")
-        return False
-    if not is_stack_running(stack_dir, compose_cmd):
-        return False
+        return []
+    services = running_services(stack_dir, compose_cmd)
+    if not services:
+        return []
     log.info("Stopping stack for consistent backup...")
     subprocess.run([*compose_cmd, "stop"], cwd=stack_dir, check=True)
     log.ok("Stack stopped")
-    return True
+    return services
 
 
-def start_stack(stack_dir, compose_cmd: list[str], was_running: bool) -> None:
-    if not was_running:
+def start_stack(stack_dir, compose_cmd: list[str], services: list[str]) -> None:
+    """Start only the services that were running before stop_stack — services
+    stopped by hand stay stopped."""
+    if not services:
         return
     log.info("Restarting stack...")
-    subprocess.run([*compose_cmd, "start"], cwd=stack_dir, check=True)
+    subprocess.run([*compose_cmd, "start", *services], cwd=stack_dir, check=True)
     log.ok("Stack restarted")
 
 
