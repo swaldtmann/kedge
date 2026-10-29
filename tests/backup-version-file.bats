@@ -32,7 +32,7 @@ _get() { grep "^$2=" "$1" | cut -d= -f2-; }
   [[ "$(_get "$f" finished)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]]
   [ -n "$(_get "$f" kedge)" ]
   [ "$(_get "$f" kedge)" != "unknown" ]
-  [ "$(stat -f %Lp "$f" 2>/dev/null || stat -c %a "$f")" = "644" ]
+  [ "$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f")" = "644" ]
   [ "$(ls "$KEDGE_STATE_DIR" | wc -l | tr -d ' ')" = "1" ]
 }
 
